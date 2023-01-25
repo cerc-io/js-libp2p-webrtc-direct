@@ -1,4 +1,5 @@
 import http from 'http'
+import assert from 'assert'
 import { logger } from '@libp2p/logger'
 import { base58btc } from 'multiformats/bases/base58'
 import { toString } from 'uint8arrays/to-string'
@@ -13,12 +14,16 @@ import { toMultiaddrConnection } from './socket-to-conn.js'
 import { Signal, WebRTCReceiver, WebRTCReceiverInit, WRTC } from '@libp2p/webrtc-peer'
 import errCode from 'err-code'
 import { pEvent } from 'p-event'
+import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
+import defer, { DeferredPromise } from 'p-defer'
+import type { SignallingMessage } from './signal-message.js'
 
 const log = logger('libp2p:webrtc-direct:listener')
 
 interface WebRTCDirectListenerOptions extends CreateListenerOptions {
   receiverOptions?: WebRTCReceiverInit
   wrtc?: WRTC
+  signallingEnabled: boolean
 }
 
 interface WebRTCDirectServerEvents {
@@ -34,9 +39,13 @@ class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
   private connections: MultiaddrConnection[]
   private channels: WebRTCReceiver[]
 
-  constructor (multiaddr: Multiaddr, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit) {
+  signallingEnabled: boolean
+  peerSignallingChannelMap: Map<string, RTCDataChannel> = new Map()
+
+  constructor (multiaddr: Multiaddr, signallingEnabled: boolean, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit) {
     super()
 
+    this.signallingEnabled = signallingEnabled
     this.connections = []
     this.channels = []
     this.wrtc = wrtc
@@ -108,6 +117,7 @@ class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       ...this.receiverOptions
     })
     this.channels.push(channel)
+    const deferredSignallingChannel: DeferredPromise<void> = defer()
 
     channel.addEventListener('signal', (evt) => {
       const signal = evt.detail
@@ -125,7 +135,10 @@ class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         log.error(err)
       })
     })
-    channel.addEventListener('ready', () => {
+    channel.addEventListener('ready', async () => {
+      // Wait for signalling channel to be opened
+      await deferredSignallingChannel.promise
+
       const maConn = toMultiaddrConnection(channel, {
         remoteAddr: ipPortToMultiaddr(remoteAddress, remotePort)
       })
@@ -145,6 +158,38 @@ class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       this.dispatchEvent(new CustomEvent('connection', { detail: maConn }))
     })
 
+    if (this.signallingEnabled) {
+      channel.addEventListener('signalling-channel', () => {
+        assert(channel.signallingChannel)
+        const signallingChannel = channel.signallingChannel
+
+        // Resolve deferredSignallingChannel promise when signalling channel opens
+        signallingChannel.addEventListener('open', () => {
+          deferredSignallingChannel.resolve()
+        })
+
+        // Handle signalling messages from peers
+        signallingChannel.addEventListener('message', (evt: MessageEvent) => {
+          const msgUint8Array: Uint8Array = evt.data
+          const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
+
+          // Add signalling channel to map on a JoinRequest
+          if (msg.type === 'JoinRequest') {
+            this.peerSignallingChannelMap.set(msg.peerId, signallingChannel)
+            return
+          }
+
+          // Forward connection signalling messgaes
+          // console.log(`Got a connection signal from peer ${msg.src} to peer ${msg.dst}, forwarding`);
+          this.peerSignallingChannelMap.get(msg.dst)?.send(msgUint8Array);
+        })
+      })
+    } else {
+      deferredSignallingChannel.resolve()
+    }
+
+    // TODO handle closing / error of signalling channel
+
     channel.handleSignal(incSignal)
   }
 
@@ -152,6 +197,8 @@ class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     await Promise.all(
       this.channels.map(async channel => await channel.close())
     )
+
+    this.peerSignallingChannelMap.clear()
 
     await new Promise<void>((resolve, reject) => {
       this.server.close((err) => {
@@ -173,13 +220,16 @@ class WebRTCDirectListener extends EventEmitter<ListenerEvents> implements Liste
   private readonly handler?: ConnectionHandler
   private readonly upgrader: Upgrader
 
-  constructor (upgrader: Upgrader, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit, handler?: ConnectionHandler) {
+  signallingEnabled: boolean
+
+  constructor (upgrader: Upgrader, signallingEnabled: boolean, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit, handler?: ConnectionHandler) {
     super()
 
     this.upgrader = upgrader
     this.wrtc = wrtc
     this.receiverOptions = receiverOptions
     this.handler = handler
+    this.signallingEnabled = signallingEnabled
   }
 
   async listen (multiaddr: Multiaddr) {
@@ -189,7 +239,7 @@ class WebRTCDirectListener extends EventEmitter<ListenerEvents> implements Liste
     }
 
     this.multiaddr = multiaddr
-    const server = new WebRTCDirectServer(multiaddr, this.wrtc, this.receiverOptions)
+    const server = new WebRTCDirectServer(multiaddr, this.signallingEnabled, this.wrtc, this.receiverOptions)
     this.server = server
 
     this.server.addEventListener('connection', (evt) => {
@@ -239,5 +289,5 @@ class WebRTCDirectListener extends EventEmitter<ListenerEvents> implements Liste
 }
 
 export function createListener (options: WebRTCDirectListenerOptions) {
-  return new WebRTCDirectListener(options.upgrader, options.wrtc, options.receiverOptions, options.handler)
+  return new WebRTCDirectListener(options.upgrader, options.signallingEnabled, options.wrtc, options.receiverOptions, options.handler)
 }
