@@ -25,6 +25,7 @@ export interface WebRTCDirectInit {
   wrtc?: WRTC
   initiatorOptions?: WebRTCInitiatorInit
   receiverOptions?: WebRTCReceiverInit
+  enableSignalling: boolean
   relayMultiAddr?: Multiaddr
 }
 
@@ -40,14 +41,17 @@ class WebRTCDirect implements Transport {
 
   peerId?: PeerId
   upgrader?: Upgrader
+
+  enableSignalling: boolean
   relayMultiAddr?: Multiaddr
   relayConnection?: WebRTCPeer
 
-  constructor (init?: WebRTCDirectInit) {
+  constructor (init: WebRTCDirectInit) {
     this.initiatorOptions = init?.initiatorOptions
     this.receiverOptions = init?.receiverOptions
     this.wrtc = init?.wrtc
 
+    this.enableSignalling = init.enableSignalling
     this.relayMultiAddr = init?.relayMultiAddr
   }
 
@@ -62,6 +66,7 @@ class WebRTCDirect implements Transport {
   async dial (ma: Multiaddr, options: DialOptions) {
     let socket: WebRTCInitiator
 
+    // TODO: restructure using enableSignalling
     // Perform regular dial if relayMultiAddr or the relay node is being dialled
     if (!this.relayMultiAddr || ma.equals(this.relayMultiAddr)) {
       socket = await this._connect(ma, options)
@@ -93,19 +98,18 @@ class WebRTCDirect implements Transport {
       throw new AbortError()
     }
 
-    const signallingEnabled = (this.relayMultiAddr !== undefined && ma.equals(this.relayMultiAddr))
+    const createSignallingChannel = (this.relayMultiAddr !== undefined && ma.equals(this.relayMultiAddr))
     const channelOptions = {
       initiator: true,
       trickle: false,
       ...this.initiatorOptions,
-      createSignallingChannel: signallingEnabled
+      createSignallingChannel
     }
 
     // Use custom WebRTC implementation
     if (this.wrtc != null) {
       channelOptions.wrtc = this.wrtc
     }
-
 
     return new Promise<WebRTCInitiator>((resolve, reject) => {
       let connected: boolean
@@ -213,7 +217,7 @@ class WebRTCDirect implements Transport {
         })
       })
 
-      if (signallingEnabled) {
+      if (this.enableSignalling) {
         const signallingChannel = channel.signallingChannel
         assert(signallingChannel)
 
@@ -229,7 +233,7 @@ class WebRTCDirect implements Transport {
 
           signallingChannel.send(msg)
           deferredSignallingChannel.resolve()
-        })
+        }, { once: true })
       } else {
         deferredSignallingChannel.resolve()
       }
@@ -343,7 +347,7 @@ class WebRTCDirect implements Transport {
           const responseSignalJson = await new Promise<string>((resolve, reject) => {
             const onMessage = (evt: MessageEvent) => {
               try {
-                const msgUint8Array: Uint8Array = evt.data
+                const msgUint8Array = new Uint8Array(evt.data)
                 const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
                 if (
@@ -485,7 +489,7 @@ class WebRTCDirect implements Transport {
       ...options,
       receiverOptions: this.receiverOptions,
       wrtc: this.wrtc,
-      signallingEnabled: this.relayMultiAddr !== undefined
+      signallingEnabled: this.enableSignalling
     })
   }
 
@@ -505,7 +509,7 @@ class WebRTCDirect implements Transport {
   }
 }
 
-export function webRTCDirect (init: WebRTCDirectInit = {}): (components: WebRTCDirectComponents) => Transport {
+export function webRTCDirect (init: WebRTCDirectInit = { enableSignalling: false }): (components: WebRTCDirectComponents) => Transport {
   return (components: WebRTCDirectComponents) => {
     const transport = new WebRTCDirect(init)
     transport.peerId = components.peerId

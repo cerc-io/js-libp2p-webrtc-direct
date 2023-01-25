@@ -170,7 +170,7 @@ class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
 
         // Handle signalling messages from peers
         signallingChannel.addEventListener('message', (evt: MessageEvent) => {
-          const msgUint8Array: Uint8Array = evt.data
+          const msgUint8Array = new Uint8Array(evt.data)
           const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
           // Add signalling channel to map on a JoinRequest
