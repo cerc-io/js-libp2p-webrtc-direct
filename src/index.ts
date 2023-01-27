@@ -124,6 +124,15 @@ class WebRTCDirect implements Transport {
       const cOpts = ma.toOptions()
       log('Dialing %s:%s', cOpts.host, cOpts.port)
 
+      const protoNames = ma.protoNames()
+      let url: string
+
+      if (protoNames.includes('https')) {
+        url = `https://${cOpts.host}:${cOpts.port}`
+      } else {
+        url = `http://${cOpts.host}:${cOpts.port}`
+      }
+
       const channel = new WebRTCInitiator(channelOptions)
 
       const onError = (evt: CustomEvent<Error>) => {
@@ -173,12 +182,10 @@ class WebRTCDirect implements Transport {
         const signalStr = JSON.stringify(signal)
 
         let host = cOpts.host
-
         if (cOpts.family === 6 && !host.startsWith('[')) {
           host = `[${host}]`
         }
 
-        const url = `http://${host}:${cOpts.port}`
         const path = `/?signal=${base58btc.encode(fromString(signalStr))}`
         const uri = url + path
 
