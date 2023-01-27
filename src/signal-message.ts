@@ -3,11 +3,18 @@ export interface JoinRequest {
   peerId: string
 }
 
-export interface ConnectSignal {
-  type: 'ConnectSignal'
+export interface ConnectRequest {
+  type: 'ConnectRequest'
   src: string
   dst: string
   signal: string
 }
 
-export type SignallingMessage = JoinRequest | ConnectSignal;
+export interface ConnectResponse {
+  type: 'ConnectResponse'
+  src: string
+  dst: string
+  signal: string
+}
+
+export type SignallingMessage = JoinRequest | ConnectRequest | ConnectResponse;

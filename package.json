@@ -169,6 +169,6 @@
     "wrtc": "^0.4.6"
   },
   "browser": {
-    "./dist/src/listener.js": "./dist/src/listener.browser.js"
+    "./dist/src/http-server.js": "./dist/src/http-server.browser.js"
   }
 }
