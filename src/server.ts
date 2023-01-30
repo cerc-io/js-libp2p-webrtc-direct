@@ -282,7 +282,10 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
           }
 
           // Forward connection signalling messgaes
-          this.peerSignallingChannelMap.get(msg.dst)?.send(msgUint8Array);
+          const dstPeerSignallingChannel = this.peerSignallingChannelMap.get(msg.dst)
+          if (dstPeerSignallingChannel) {
+            dstPeerSignallingChannel.send(msgUint8Array);
+          }
         })
       })
     } else {
