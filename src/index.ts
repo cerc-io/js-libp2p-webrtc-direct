@@ -23,6 +23,8 @@ import { WebRTCDirectSigServer } from './server.js'
 
 const log = logger('libp2p:webrtc-direct')
 
+export { P2P_WEBRTC_STAR_ID } from './constants.js'
+
 export interface WebRTCDirectInit {
   wrtc?: WRTC
   initiatorOptions?: WebRTCInitiatorInit
