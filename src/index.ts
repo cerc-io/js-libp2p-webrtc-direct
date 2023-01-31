@@ -101,7 +101,7 @@ class WebRTCDirect implements Transport {
       return await this._connectToRelay(ma, options)
     }
 
-    // Otherwise expect signalling channel to exist and connection through signalling channel
+    // Otherwise expect signalling channel to exist and connect using signalling channel
     if (!this.signallingChannel) {
       throw new Error('signalling channel not open to relay node')
     }
@@ -241,7 +241,7 @@ class WebRTCDirect implements Transport {
       // Wait for main data channel to be opened
       const channelOpenPromises: Promise<any>[] = [pEvent(channel, 'ready')]
 
-      // Handle the signalling channel if dialling to the relay node
+      // Handle the signalling channel if dialling to the relay node and signalling is enabled
       if (diallingRelayNode) {
         const signallingChannel = channel.signallingChannel
         assert(signallingChannel)
@@ -274,9 +274,7 @@ class WebRTCDirect implements Transport {
       signallingChannel.send(msg)
     }
 
-    signallingChannel.addEventListener('open', onSignallingChannelOpen, {
-      once: true
-    })
+    signallingChannel.addEventListener('open', onSignallingChannelOpen)
   }
 
   async _connectUsingRelay (ma: Multiaddr, options: DialOptions) {
