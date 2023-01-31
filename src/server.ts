@@ -25,7 +25,6 @@ interface WebRTCDirectServerEvents {
   'connection': CustomEvent<MultiaddrConnection>
 }
 
-// TODO: Handle relay node / signallingChannel disconnect | close
 export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents> {
   private readonly receiverOptions?: WebRTCReceiverInit
   private channels: WebRTCReceiver[]
@@ -64,19 +63,8 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
       signallingChannel.removeEventListener('message', handleMessage)
     }, { once: true })
 
-    signallingChannel.addEventListener('error', (evt) => {
-      // @ts-expect-error ChannelErrorEvent is just an Event in the types?
-      const err = evt.error instanceof Error
-      // @ts-expect-error ChannelErrorEvent is just an Event in the types?
-      ? evt.error
-      // @ts-expect-error ChannelErrorEvent is just an Event in the types?
-      : new Error(`signalling channel error: ${evt.error?.message} ${evt.error?.errorDetail}`)
-
-      log.error('signalling channel error', err)
-    })
-
     this.dispatchEvent(new CustomEvent('listening'))
-    // log('Listening on %s %s', lOpts.port, lOpts.host)
+    log('Listening using a signalling channel')
   }
 
   async processRequest (request: ConnectRequest) {
@@ -296,14 +284,17 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         const msgUint8Array = new Uint8Array(evt.data)
         const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
-        // Add signalling channel to map on a JoinRequest
+        // Add signalling channel to map on a JoinRequest (made only once when channel opens)
         if (msg.type === 'JoinRequest') {
           this.peerSignallingChannelMap.set(msg.peerId, signallingChannel)
 
-          // Remove the entry from peerSignallingChannelMap for peer if channel closes
-          signallingChannel.addEventListener('close', () => {
+          // Remove the entry from peerSignallingChannelMap for peer if channel closes or runs into an error
+          const handleChannelCloseOrError = () => {
             this.peerSignallingChannelMap.delete(msg.peerId)
-          })
+          };
+
+          signallingChannel.addEventListener('close', handleChannelCloseOrError)
+          signallingChannel.addEventListener('error', handleChannelCloseOrError)
 
           return
         }
@@ -313,7 +304,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         if (dstPeerSignallingChannel) {
           dstPeerSignallingChannel.send(msgUint8Array);
         } else {
-          log('no signalling channel open for peer %s', msg.dst)
+          log('signalling channel not open for peer %s', msg.dst)
         }
       })
     }

@@ -281,14 +281,33 @@ class WebRTCDirect implements Transport {
         deferredSignallingChannel.resolve()
       })
 
-      signallingChannel.addEventListener('close', () => {
-        log('signalling channel closed')
-
-        // Open a new signalling channel if peer connection still exists
+      const recreateSignallingChannel = () => {
         if (!channel.closed) {
           log('opening a new signalling channel')
           channel.createSignallingChannel()
         }
+      }
+
+      signallingChannel.addEventListener('close', () => {
+        log('signalling channel closed')
+
+        // Open a new signalling channel if peer connection still exists
+        recreateSignallingChannel()
+      })
+
+      signallingChannel.addEventListener('error', (evt) => {
+        // @ts-expect-error ChannelErrorEvent is just an Event in the types?
+        if (evt.error?.message === 'Transport channel closed') {
+          return signallingChannel.close()
+        }
+
+        // @ts-expect-error
+        const err = evt.error instanceof Error ? evt.error : new Error(`signalling channel error: ${evt.error?.message} ${evt.error?.errorDetail}`)
+
+        log.error('signalling channel error', err)
+
+        // Open a new signalling channel if peer connection still exists
+        recreateSignallingChannel()
       })
     }
 
