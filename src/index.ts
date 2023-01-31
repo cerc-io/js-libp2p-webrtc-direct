@@ -15,7 +15,7 @@ import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
 import type { PeerId } from '@libp2p/interface-peer-id'
 import { pEvent } from 'p-event'
 
-import { CODE_CIRCUIT, CODE_P2P } from './constants.js'
+import { CODE_CIRCUIT, CODE_P2P, P2P_WEBRTC_STAR_ID } from './constants.js'
 import { toMultiaddrConnection } from './socket-to-conn.js'
 import { createListener, WebRTCDirectListener } from './listener.js'
 import type { ConnectRequest, JoinRequest, SignallingMessage } from './signal-message.js'
@@ -423,8 +423,25 @@ class WebRTCDirect implements Transport {
         return false
       }
 
-      const decapsulated = ma.decapsulateCode(CODE_P2P)
-      return mafmt.WebRTCDirect.matches(decapsulated) || mafmt.WebRTCDirect.matches(decapsulated.decapsulateCode(CODE_P2P))
+      // Additional check on the relay peer id for addresses having P2P_WEBRTC_STAR_ID
+      // Eg. Listen address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWRxmi5GXThHcLzadFGS7KWwMmYMsVpMjZpbgV6QQ1Cd68/p2p-webrtc-star)
+      // Eg. Peer address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWENbU4KTaLgfdQVC5Ths6EewQJjYo4AjtPx2ykRrooT51/p2p-webrtc-star/p2p/12D3KooWBdPEfKR3MdA4L9BhJJ1RcDFK3XCgJ4bLx4kAJow1i8fg)
+      if (ma.protoNames().includes(P2P_WEBRTC_STAR_ID)) {
+        // Match with webrtc-direct for listen addresses (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct)
+        if (mafmt.WebRTCDirect.matches(ma.decapsulateCode(CODE_P2P))) {
+          // Ensure that the peer id in the listening address matches the given relay peer id
+          return ma.getPeerId() === this.relayPeerId
+        }
+
+        // Decapsulate for peer addresses and then perform the same checks as above
+        // Eg. Decapsulated address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWENbU4KTaLgfdQVC5Ths6EewQJjYo4AjtPx2ykRrooT51/p2p-webrtc-star)
+        const decapsulated = ma.decapsulateCode(CODE_P2P)
+        return mafmt.WebRTCDirect.matches(decapsulated.decapsulateCode(CODE_P2P)) && decapsulated.getPeerId() === this.relayPeerId
+      }
+
+      // Addresses without P2P_WEBRTC_STAR_ID
+      // Eg. Relay node address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWRxmi5GXThHcLzadFGS7KWwMmYMsVpMjZpbgV6QQ1Cd68)
+      return mafmt.WebRTCDirect.matches(ma.decapsulateCode(CODE_P2P))
     })
   }
 }
