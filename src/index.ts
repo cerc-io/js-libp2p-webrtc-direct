@@ -219,35 +219,44 @@ class WebRTCDirect implements Transport {
         })
       })
 
-      const channelPromises: Promise<any>[] = [pEvent(channel, 'ready')]
+      // Wait for main data channel to be opened
+      const channelOpenPromises: Promise<any>[] = [pEvent(channel, 'ready')]
 
-      // Send a join request if dialling to the relay node
+      // Handle the signalling channel if dialling to the relay node
       if (diallingRelayNode) {
         const signallingChannel = channel.signallingChannel
         assert(signallingChannel)
 
-        const onSignallingChannelOpen = () => {
-          assert(this.peerId)
+        // Register open event handler for the signalling channel
+        this._registerSignallingChannelOpenHandler(signallingChannel)
 
-          const request: JoinRequest = {
-            type: 'JoinRequest',
-            peerId: this.peerId.toString()
-          };
-          const msg = uint8ArrayFromString(JSON.stringify(request))
-
-          signallingChannel.send(msg)
-        }
-
-        // Send a JoinRequest when the signalling channel opens
-        signallingChannel.addEventListener('open', onSignallingChannelOpen, { once: true })
-        channelPromises.push(pEvent(signallingChannel, 'open'))
+        // Wait for signalling channel to be opened
+        channelOpenPromises.push(pEvent(signallingChannel, 'open'))
       }
 
-      // Wait for all channels to be ready/opened
-      await Promise.all(channelPromises)
+      await Promise.all(channelOpenPromises)
       connected = true
       log('connection opened %s:%s', cOpts.host, cOpts.port)
       done()
+    })
+  }
+
+  _registerSignallingChannelOpenHandler (signallingChannel: RTCDataChannel) {
+    const onSignallingChannelOpen = () => {
+      assert(this.peerId)
+
+      // Send a JoinRequest message when the signalling channel opens
+      const request: JoinRequest = {
+        type: 'JoinRequest',
+        peerId: this.peerId.toString()
+      };
+
+      const msg = uint8ArrayFromString(JSON.stringify(request))
+      signallingChannel.send(msg)
+    }
+
+    signallingChannel.addEventListener('open', onSignallingChannelOpen, {
+      once: true
     })
   }
 
