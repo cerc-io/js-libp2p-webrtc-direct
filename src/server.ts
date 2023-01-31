@@ -46,8 +46,11 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
 
     signallingChannel.addEventListener('message', (evt: MessageEvent) => {
       const msgUint8Array = new Uint8Array(evt.data);
+
+      // Parse incoming message into a SignallingMessage object
       const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
+      // Handle connect requests over signalling channel (forwarded by relay node); ignore everything else
       if (msg.type === 'ConnectRequest') {
         this.processRequest(msg)
       }
@@ -261,40 +264,50 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     })
 
     if (this.signallingEnabled) {
-      channel.addEventListener('signalling-channel', () => {
-        assert(channel.signallingChannel)
-        const signallingChannel = channel.signallingChannel
-
-        // Resolve deferredSignallingChannel promise when signalling channel opens
-        signallingChannel.addEventListener('open', () => {
-          deferredSignallingChannel.resolve()
-        })
-
-        // Handle signalling messages from peers
-        signallingChannel.addEventListener('message', (evt: MessageEvent) => {
-          const msgUint8Array = new Uint8Array(evt.data)
-          const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
-
-          // Add signalling channel to map on a JoinRequest
-          if (msg.type === 'JoinRequest') {
-            this.peerSignallingChannelMap.set(msg.peerId, signallingChannel)
-            return
-          }
-
-          // Forward connection signalling messgaes
-          const dstPeerSignallingChannel = this.peerSignallingChannelMap.get(msg.dst)
-          if (dstPeerSignallingChannel) {
-            dstPeerSignallingChannel.send(msgUint8Array);
-          }
-        })
-      })
+      // Handle signalling-channel event on channel
+      await this._registerSignalllingChannelHandler(channel, deferredSignallingChannel)
     } else {
+      // Resolve immediately if signalling not enabled
       deferredSignallingChannel.resolve()
     }
 
-    // TODO handle closing / error of signalling channel
-
     channel.handleSignal(incSignal)
+  }
+
+  async _registerSignalllingChannelHandler (channel: WebRTCReceiver, deferredSignallingChannel: DeferredPromise<void>) {
+    const handleSignalllingChannel = (evt: CustomEvent<RTCDataChannel>) => {
+      const signallingChannel = evt.detail
+
+      // Resolve deferredSignallingChannel promise when signalling channel opens
+      signallingChannel.addEventListener('open', () => {
+        deferredSignallingChannel.resolve()
+      })
+
+      // Handle signalling messages from peers
+      signallingChannel.addEventListener('message', (evt: MessageEvent) => {
+        const msgUint8Array = new Uint8Array(evt.data)
+        const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
+
+        // Add signalling channel to map on a JoinRequest
+        if (msg.type === 'JoinRequest') {
+          this.peerSignallingChannelMap.set(msg.peerId, signallingChannel)
+          return
+        }
+
+        // Forward peer signalling messgaes
+        const dstPeerSignallingChannel = this.peerSignallingChannelMap.get(msg.dst)
+        if (dstPeerSignallingChannel) {
+          dstPeerSignallingChannel.send(msgUint8Array);
+        } else {
+          log('no signalling channel open for peer %s', msg.dst)
+        }
+      })
+
+      // TODO handle closing / error of signalling channel
+      // this.peerSignallingChannelMap.delete()
+    }
+
+    channel.addEventListener('signalling-channel', handleSignalllingChannel)
   }
 
   async close () {
