@@ -109,7 +109,7 @@ class WebRTCDirect implements Transport {
     return this._connectUsingRelay(ma, options)
   }
 
-  async _connect (ma: Multiaddr, options: DialOptions, diallingRelayNode: boolean) {
+  async _connect (ma: Multiaddr, options: DialOptions, createSignallingChannel: boolean) {
     if (options.signal?.aborted === true) {
       throw new AbortError()
     }
@@ -117,8 +117,7 @@ class WebRTCDirect implements Transport {
     const channelOptions = {
       initiator: true,
       trickle: false,
-      ...this.initiatorOptions,
-      createSignallingChannel: diallingRelayNode
+      ...this.initiatorOptions
     }
 
     // Use custom WebRTC implementation
@@ -243,13 +242,23 @@ class WebRTCDirect implements Transport {
       })
 
       // Handle the signalling channel if dialling to the relay node and signalling is enabled
-      if (diallingRelayNode) {
+      if (createSignallingChannel) {
         await this._registerSignalllingChannelHandler(channel, deferredSignallingChannel)
+
+        // Create signalling channel after handlers have been registered
+        this._createSignallingChannel(channel)
       } else {
         // Resolve immediately if not dialling to the relay node or signalling is not enabled
         deferredSignallingChannel.resolve()
       }
     })
+  }
+
+  _createSignallingChannel (channel: WebRTCInitiator) {
+    if (!channel.closed) {
+      log('opening a new signalling channel')
+      channel.createSignallingChannel()
+    }
   }
 
   async _registerSignalllingChannelHandler (channel: WebRTCInitiator, deferredSignallingChannel: DeferredPromise<void>) {
@@ -281,18 +290,11 @@ class WebRTCDirect implements Transport {
         deferredSignallingChannel.resolve()
       })
 
-      const recreateSignallingChannel = () => {
-        if (!channel.closed) {
-          log('opening a new signalling channel')
-          channel.createSignallingChannel()
-        }
-      }
-
       signallingChannel.addEventListener('close', () => {
         log('signalling channel closed')
 
         // Open a new signalling channel if peer connection still exists
-        recreateSignallingChannel()
+        this._createSignallingChannel(channel)
       })
 
       signallingChannel.addEventListener('error', (evt) => {
@@ -307,7 +309,7 @@ class WebRTCDirect implements Transport {
         log.error('signalling channel error', err)
 
         // Open a new signalling channel if peer connection still exists
-        recreateSignallingChannel()
+        this._createSignallingChannel(channel)
       })
     }
 
@@ -325,8 +327,7 @@ class WebRTCDirect implements Transport {
     const channelOptions = {
       initiator: true,
       trickle: false,
-      ...this.initiatorOptions,
-      createSignallingChannel: false
+      ...this.initiatorOptions
     }
 
     // Use custom WebRTC implementation
