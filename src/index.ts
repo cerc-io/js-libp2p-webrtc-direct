@@ -13,7 +13,7 @@ import type { Multiaddr } from '@multiformats/multiaddr'
 import { fromString as uint8ArrayFromString } from 'uint8arrays/from-string';
 import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
 import type { PeerId } from '@libp2p/interface-peer-id'
-import { pEvent } from 'p-event'
+import defer, { DeferredPromise } from 'p-defer'
 
 import { CODE_CIRCUIT, CODE_P2P, P2P_WEBRTC_STAR_ID } from './constants.js'
 import { toMultiaddrConnection } from './socket-to-conn.js'
@@ -98,7 +98,7 @@ class WebRTCDirect implements Transport {
 
     // If the relay node is being dialled, perform regular dial + create an additional channel for signalling
     if (ma.getPeerId() === this.relayPeerId) {
-      return await this._connectToRelay(ma, options)
+      return this._connect(ma, options, true)
     }
 
     // Otherwise expect signalling channel to exist and connect using signalling channel
@@ -106,20 +106,7 @@ class WebRTCDirect implements Transport {
       throw new Error('signalling channel not open to relay node')
     }
 
-    return await this._connectUsingRelay(ma, options)
-  }
-
-  async _connectToRelay (ma: Multiaddr, options: DialOptions) {
-    const socket = await this._connect(ma, options, true)
-    this.signallingChannel = socket.signallingChannel
-
-    if (this.peerListener?.server instanceof WebRTCDirectSigServer) {
-      // Start listening using the signalling channel
-      assert(this.signallingChannel)
-      this.peerListener.server.init(this.signallingChannel)
-    }
-
-    return socket
+    return this._connectUsingRelay(ma, options)
   }
 
   async _connect (ma: Multiaddr, options: DialOptions, diallingRelayNode: boolean) {
@@ -156,6 +143,9 @@ class WebRTCDirect implements Transport {
 
       const channel = new WebRTCInitiator(channelOptions)
 
+      // Use a deferred promise on signalling channel
+      const deferredSignallingChannel: DeferredPromise<void> = defer()
+
       const onError = (evt: CustomEvent<Error>) => {
         const err = evt.detail
 
@@ -168,6 +158,16 @@ class WebRTCDirect implements Transport {
         }
       }
 
+      const onReady = async () => {
+        // Wait for signalling channel to be opened
+        await deferredSignallingChannel.promise
+
+        connected = true
+
+        log('connection opened %s:%s', cOpts.host, cOpts.port)
+        done()
+      }
+
       const onAbort = () => {
         log.error('connection aborted %s:%s', cOpts.host, cOpts.port)
         void channel.close().finally(() => {
@@ -177,6 +177,7 @@ class WebRTCDirect implements Transport {
 
       const done = (err?: Error) => {
         channel.removeEventListener('error', onError)
+        channel.removeEventListener('ready', onReady)
         options.signal?.removeEventListener('abort', onAbort)
 
         if (err != null) {
@@ -187,6 +188,9 @@ class WebRTCDirect implements Transport {
       }
 
       channel.addEventListener('error', onError, {
+        once: true
+      })
+      channel.addEventListener('ready', onReady, {
         once: true
       })
       channel.addEventListener('close', () => {
@@ -238,43 +242,57 @@ class WebRTCDirect implements Transport {
         })
       })
 
-      // Wait for main data channel to be opened
-      const channelOpenPromises: Promise<any>[] = [pEvent(channel, 'ready')]
-
       // Handle the signalling channel if dialling to the relay node and signalling is enabled
       if (diallingRelayNode) {
-        const signallingChannel = channel.signallingChannel
-        assert(signallingChannel)
-
-        // Register open event handler for the signalling channel
-        this._registerSignallingChannelOpenHandler(signallingChannel)
-
-        // Wait for signalling channel to be opened
-        channelOpenPromises.push(pEvent(signallingChannel, 'open'))
+        await this._registerSignalllingChannelHandler(channel, deferredSignallingChannel)
+      } else {
+        // Resolve immediately if not dialling to the relay node or signalling is not enabled
+        deferredSignallingChannel.resolve()
       }
-
-      await Promise.all(channelOpenPromises)
-      connected = true
-      log('connection opened %s:%s', cOpts.host, cOpts.port)
-      done()
     })
   }
 
-  _registerSignallingChannelOpenHandler (signallingChannel: RTCDataChannel) {
-    const onSignallingChannelOpen = () => {
+  async _registerSignalllingChannelHandler (channel: WebRTCInitiator, deferredSignallingChannel: DeferredPromise<void>) {
+    const handleSignalllingChannel = (evt: CustomEvent<RTCDataChannel>) => {
+      const signallingChannel = evt.detail
+
+      // Set the signalling channel
+      this.signallingChannel = signallingChannel
+
       assert(this.peerId)
+      const peerIdString = this.peerId.toString()
 
-      // Send a JoinRequest message when the signalling channel opens
-      const request: JoinRequest = {
-        type: 'JoinRequest',
-        peerId: this.peerId.toString()
-      };
+      signallingChannel.addEventListener('open', () => {
+        // Send a JoinRequest message when the signalling channel opens
+        const request: JoinRequest = {
+          type: 'JoinRequest',
+          peerId: peerIdString
+        };
 
-      const msg = uint8ArrayFromString(JSON.stringify(request))
-      signallingChannel.send(msg)
+        const msg = uint8ArrayFromString(JSON.stringify(request))
+        signallingChannel.send(msg)
+
+        // Start listening using the signalling channel
+        if (this.peerListener?.server instanceof WebRTCDirectSigServer) {
+          this.peerListener.server.init(signallingChannel)
+        }
+
+        // Resolve deferredSignallingChannel promise
+        deferredSignallingChannel.resolve()
+      })
+
+      signallingChannel.addEventListener('close', () => {
+        log('signalling channel closed')
+
+        // Open a new signalling channel if peer connection still exists
+        if (!channel.closed) {
+          log('opening a new signalling channel')
+          channel.createSignallingChannel()
+        }
+      })
     }
 
-    signallingChannel.addEventListener('open', onSignallingChannelOpen)
+    channel.addEventListener('signalling-channel', handleSignalllingChannel)
   }
 
   async _connectUsingRelay (ma: Multiaddr, options: DialOptions) {
