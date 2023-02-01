@@ -69,20 +69,19 @@ class WebRTCDirect implements Transport {
     return '@libp2p/webrtc-direct'
   }
 
-  // TODO: Handle dial from relay nodes (federated setup)
   async dial (ma: Multiaddr, options: DialOptions) {
     let socket: WebRTCInitiator
 
-    if (this.enableSignalling && this.relayPeerId) {
-      socket = await this._dialUsingRelay(ma, options)
+    if (this.enableSignalling) {
+      socket = await this._dialWithSignallingEnabled(ma, options)
     } else {
       // Ensure that dial address doesn't include P2P_WEBRTC_STAR_ID
       if (ma.toString().includes(P2P_WEBRTC_STAR_ID)) {
         throw new Error('Cannot dial ma containing webrtc-star id if signalling not enabled or relayPeerId not set')
       }
 
-      // Perform regular dial if signalling not enabled or relayPeerId not set
-      socket = await this._connect(ma, options, false)
+      // Perform regular dial
+      socket = await this._connect(ma, options)
     }
 
     const maConn = toMultiaddrConnection(socket, { remoteAddr: ma, signal: options.signal })
@@ -93,23 +92,35 @@ class WebRTCDirect implements Transport {
     return conn
   }
 
-  async _dialUsingRelay (ma: Multiaddr, options: DialOptions) {
-    assert(this.relayPeerId)
-
-    // If the relay node is being dialled, perform regular dial + create an additional channel for signalling
-    if (ma.getPeerId() === this.relayPeerId) {
-      return this._connect(ma, options, true)
+  async _dialWithSignallingEnabled (ma: Multiaddr, options: DialOptions) {
+    // Dial using signalling channel if multiaddr being dialled contains webrtc-star id
+    // (peer nodes)
+    if (ma.toString().includes(P2P_WEBRTC_STAR_ID)) {
+      // Perform dial using signalling channel
+      return this._dialUsingSignallingChannel(ma, options)
     }
 
-    // Otherwise expect signalling channel to exist and connect using signalling channel
+    // Otherwise, perform regular dial (relay nodes);
+    // Create signalling channel if dialling primary relay node
+    const createSignallingChannel = (this.relayPeerId && ma.getPeerId() === this.relayPeerId)
+    return this._connect(ma, options, createSignallingChannel)
+  }
+
+  async _dialUsingSignallingChannel (ma: Multiaddr, options: DialOptions) {
+    // Expect relayPeerId to be set
+    if (!this.relayPeerId) {
+      throw new Error('relay peer id not set')
+    }
+
+    // Expect signalling channel to exist and connect using signalling channel
     if (!this.signallingChannel) {
       throw new Error('signalling channel not open to relay node')
     }
 
-    return this._connectUsingRelay(ma, options)
+    return this._connectUsingSignallingChannel(ma, options)
   }
 
-  async _connect (ma: Multiaddr, options: DialOptions, createSignallingChannel: boolean) {
+  async _connect (ma: Multiaddr, options: DialOptions, createSignallingChannel = false) {
     if (options.signal?.aborted === true) {
       throw new AbortError()
     }
@@ -316,7 +327,7 @@ class WebRTCDirect implements Transport {
     channel.addEventListener('signalling-channel', handleSignalllingChannel)
   }
 
-  async _connectUsingRelay (ma: Multiaddr, options: DialOptions) {
+  async _connectUsingSignallingChannel (ma: Multiaddr, options: DialOptions) {
     assert(this.peerId)
     const peerId = this.peerId
 
