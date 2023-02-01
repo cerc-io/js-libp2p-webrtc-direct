@@ -196,6 +196,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
 
     const url = new URL(requestUrl, `http://${remoteHost}`)
     const incSignalStr = url.searchParams.get('signal')
+    const createSignallingChannel = url.searchParams.get('signalling_channel') === 'true'
 
     if (incSignalStr == null) {
       const err = new Error('Invalid listener request. Signal not found.')
@@ -262,7 +263,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       this.dispatchEvent(new CustomEvent('connection', { detail: maConn }))
     })
 
-    if (this.signallingEnabled) {
+    if (this.signallingEnabled && createSignallingChannel) {
       // Handle signalling-channel event on channel
       await this._registerSignalllingChannelHandler(channel, deferredSignallingChannel)
     } else {

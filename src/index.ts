@@ -221,7 +221,7 @@ class WebRTCDirect implements Transport {
           host = `[${host}]`
         }
 
-        const path = `/?signal=${base58btc.encode(fromString(signalStr))}`
+        const path = `/?signal=${base58btc.encode(fromString(signalStr))}&signalling_channel=${createSignallingChannel}`
         const uri = url + path
 
         try {
