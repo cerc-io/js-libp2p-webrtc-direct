@@ -58,7 +58,7 @@ class WebRTCDirect implements Transport {
     this.wrtc = init?.wrtc
 
     this.enableSignalling = init.enableSignalling
-    this.relayPeerId = init?.relayPeerId // Might not be set in case of relay nodes
+    this.relayPeerId = init?.relayPeerId // Not set in case of relay nodes
   }
 
   get [symbol] (): true {
@@ -490,6 +490,11 @@ class WebRTCDirect implements Transport {
       // Eg. Listen address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWRxmi5GXThHcLzadFGS7KWwMmYMsVpMjZpbgV6QQ1Cd68/p2p-webrtc-star)
       // Eg. Peer address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWENbU4KTaLgfdQVC5Ths6EewQJjYo4AjtPx2ykRrooT51/p2p-webrtc-star/p2p/12D3KooWBdPEfKR3MdA4L9BhJJ1RcDFK3XCgJ4bLx4kAJow1i8fg)
       if (ma.protoNames().includes(P2P_WEBRTC_STAR_ID)) {
+        // Reject if signalling not enabled
+        if (!this.enableSignalling) {
+          return false
+        }
+
         // Match with webrtc-direct for listen addresses (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct)
         if (mafmt.WebRTCDirect.matches(ma.decapsulateCode(CODE_P2P))) {
           // Ensure that the peer id in the listening address matches the given relay peer id
