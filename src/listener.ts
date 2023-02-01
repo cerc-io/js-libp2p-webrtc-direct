@@ -51,7 +51,7 @@ export class WebRTCDirectListener extends EventEmitter<ListenerEvents> implement
     }
 
     if (this.signallingEnabled && this.multiaddr.toString().includes(P2P_WEBRTC_STAR_ID)) {
-      this.server = new WebRTCDirectSigServer(multiaddr, this.receiverOptions)
+      this.server = new WebRTCDirectSigServer(multiaddr, this.wrtc, this.receiverOptions)
       this.server.addEventListener('listening', disPatchListeningEvent);
     } else {
       this.server = new WebRTCDirectServer(multiaddr, this.signallingEnabled, this.wrtc, this.receiverOptions)

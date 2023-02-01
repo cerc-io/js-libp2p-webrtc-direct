@@ -26,17 +26,19 @@ interface WebRTCDirectServerEvents {
 }
 
 export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents> {
+  private readonly wrtc?: WRTC
   private readonly receiverOptions?: WebRTCReceiverInit
   private channels: WebRTCReceiver[]
 
   private readonly multiAddr: Multiaddr
   private signallingChannel?: RTCDataChannel
 
-  constructor (multiaddr: Multiaddr, receiverOptions?: WebRTCReceiverInit) {
+  constructor (multiaddr: Multiaddr, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit) {
     super()
 
     this.multiAddr = multiaddr
     this.channels = []
+    this.wrtc = wrtc
     this.receiverOptions = receiverOptions
   }
 
@@ -79,6 +81,7 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
     }
 
     const channel = new WebRTCReceiver({
+      wrtc: this.wrtc,
       ...this.receiverOptions
     })
     this.channels.push(channel)
