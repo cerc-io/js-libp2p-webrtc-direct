@@ -51,7 +51,7 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
       // Parse incoming message into a SignallingMessage object
       const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
-      // Handle connect requests over signalling channel (forwarded by relay node); ignore everything else
+      // Handle connect requests forwarded over signalling channel; ignore everything else
       if (msg.type === 'ConnectRequest') {
         this.processRequest(msg)
       }
@@ -109,6 +109,7 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
     })
     channel.addEventListener('ready', async () => {
       const maConn = toMultiaddrConnection(channel, {
+        // Form the multiaddr for remote peer by appending it's peer id to the listening multiaddr
         remoteAddr: multiaddr(`${this.multiAddr.toString()}/p2p/${request.src}`)
       })
       log('new inbound connection %s', maConn.remoteAddr)
@@ -141,6 +142,8 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
   private channels: WebRTCReceiver[]
 
   private readonly signallingEnabled: boolean
+  // Keep track of signalling channels formed to peers by their peer id
+  // to forward signalling messages
   private readonly peerSignallingChannelMap: Map<string, RTCDataChannel> = new Map()
 
   constructor (multiaddr: Multiaddr, signallingEnabled: boolean, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit) {
@@ -177,7 +180,6 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     this.server.listen(lOpts)
   }
 
-  // TODO: Ensure normal direct connections from other relay nodes
   async processRequest (req: IncomingMessage, res: ServerResponse) {
     const remoteAddress = req?.socket?.remoteAddress
     const remotePort = req?.socket.remotePort
@@ -221,7 +223,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     })
     this.channels.push(channel)
 
-    // Use a deferred promise on signalling channel as it might not be initialized yet
+    // Create a deferred promise on signalling channel as it might not be initialized yet
     const deferredSignallingChannel: DeferredPromise<void> = defer()
 
     channel.addEventListener('signal', (evt) => {
@@ -241,7 +243,8 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       })
     })
     channel.addEventListener('ready', async () => {
-      // Wait for signalling channel to be opened
+      // 'ready' event is emitted when the main datachannel opens
+      // Wait for signalling channel to be opened as well
       await deferredSignallingChannel.promise
 
       const maConn = toMultiaddrConnection(channel, {
@@ -263,6 +266,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       this.dispatchEvent(new CustomEvent('connection', { detail: maConn }))
     })
 
+    // Handle the signalling channel if specified in the request and signalling is enabled
     if (this.signallingEnabled && shouldCreateSignallingChannel) {
       // Handle signalling-channel event on channel
       await this._registerSignallingChannelHandler(channel, deferredSignallingChannel)
@@ -288,7 +292,8 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         const msgUint8Array = new Uint8Array(evt.data)
         const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
-        // Add signalling channel to map on a JoinRequest (made only once when channel opens)
+        // Add signalling channel to a map on a JoinRequest
+        // (made only once when the channel opens)
         if (msg.type === 'JoinRequest') {
           this.peerSignallingChannelMap.set(msg.peerId, signallingChannel)
 
@@ -321,6 +326,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       this.channels.map(async channel => await channel.close())
     )
 
+    // Clear the (peer - signalling channel) mapping
     this.peerSignallingChannelMap.clear()
 
     await new Promise<void>((resolve, reject) => {

@@ -3,7 +3,8 @@
 export const CODE_P2P = 421
 export const CODE_CIRCUIT = 290
 
-// Use existing protocol id in multiaddr to listen through signalling channel to relay node
+// Use a supported protocol id in multiaddr to listen through signalling channel
+// Need to use one of the supported protocol names (list: https://github.com/multiformats/multiaddr/blob/master/protocols.csv) for the multiaddr to be valid
 export const P2P_WEBRTC_STAR_ID = 'p2p-webrtc-star'
 
 // Time to wait for a connection to close gracefully before destroying it

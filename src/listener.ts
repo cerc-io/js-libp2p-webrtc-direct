@@ -50,6 +50,8 @@ export class WebRTCDirectListener extends EventEmitter<ListenerEvents> implement
       this.dispatchEvent(new CustomEvent('listening'))
     }
 
+    // Peer nodes use a multiaddr containing webrtc-star id to listen using a signalling channel
+    // If signalling is enabled and listen multiaddr contains webrtc-star id, use WebRTCDirectSigServer
     if (this.signallingEnabled && this.multiaddr.toString().includes(P2P_WEBRTC_STAR_ID)) {
       this.server = new WebRTCDirectSigServer(multiaddr, this.wrtc, this.receiverOptions)
       this.server.addEventListener('listening', disPatchListeningEvent);
@@ -59,7 +61,7 @@ export class WebRTCDirectListener extends EventEmitter<ListenerEvents> implement
 
       // Wait for listening event in case of WebRTCDirectServer (listening on host:port)
       // In case of WebRTCDirectSigServer (listening through signalling channel),
-      // the listening event is fired later on server initialization (peer is connected to the relay node and and signalling channel is opened)
+      // the listening event is fired later on server initialization (peer has a signalling channel opened)
       await pEvent(this.server, 'listening')
     }
 
