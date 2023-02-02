@@ -9,7 +9,7 @@ import { EventEmitter, CustomEvent } from '@libp2p/interfaces/events'
 import type { MultiaddrConnection } from '@libp2p/interface-connection'
 import { ipPortToMultiaddr } from '@libp2p/utils/ip-port-to-multiaddr'
 import { toMultiaddrConnection } from './socket-to-conn.js'
-import { Signal, WebRTCReceiver, WebRTCReceiverInit, WRTC } from '@libp2p/webrtc-peer'
+import { Signal, WebRTCReceiver, WebRTCReceiverInit, WRTC } from '@cerc-io/webrtc-peer'
 import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
 import { fromString as uint8ArrayFromString } from 'uint8arrays/from-string';
 import defer, { DeferredPromise } from 'p-defer'
