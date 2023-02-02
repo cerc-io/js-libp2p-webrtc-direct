@@ -140,8 +140,8 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
   private connections: MultiaddrConnection[]
   private channels: WebRTCReceiver[]
 
-  signallingEnabled: boolean
-  peerSignallingChannelMap: Map<string, RTCDataChannel> = new Map()
+  private readonly signallingEnabled: boolean
+  private readonly peerSignallingChannelMap: Map<string, RTCDataChannel> = new Map()
 
   constructor (multiaddr: Multiaddr, signallingEnabled: boolean, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit) {
     super()
@@ -196,7 +196,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
 
     const url = new URL(requestUrl, `http://${remoteHost}`)
     const incSignalStr = url.searchParams.get('signal')
-    const createSignallingChannel = url.searchParams.get('signalling_channel') === 'true'
+    const shouldCreateSignallingChannel = url.searchParams.get('signalling_channel') === 'true'
 
     if (incSignalStr == null) {
       const err = new Error('Invalid listener request. Signal not found.')
@@ -263,9 +263,9 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       this.dispatchEvent(new CustomEvent('connection', { detail: maConn }))
     })
 
-    if (this.signallingEnabled && createSignallingChannel) {
+    if (this.signallingEnabled && shouldCreateSignallingChannel) {
       // Handle signalling-channel event on channel
-      await this._registerSignalllingChannelHandler(channel, deferredSignallingChannel)
+      await this._registerSignallingChannelHandler(channel, deferredSignallingChannel)
     } else {
       // Resolve immediately if signalling not enabled
       deferredSignallingChannel.resolve()
@@ -274,8 +274,8 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     channel.handleSignal(incSignal)
   }
 
-  async _registerSignalllingChannelHandler (channel: WebRTCReceiver, deferredSignallingChannel: DeferredPromise<void>) {
-    const handleSignalllingChannel = (evt: CustomEvent<RTCDataChannel>) => {
+  async _registerSignallingChannelHandler (channel: WebRTCReceiver, deferredSignallingChannel: DeferredPromise<void>) {
+    const handleSignallingChannel = (evt: CustomEvent<RTCDataChannel>) => {
       const signallingChannel = evt.detail
 
       // Resolve deferredSignallingChannel promise when signalling channel opens
@@ -303,17 +303,17 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
           return
         }
 
-        // Forward peer signalling messgaes
-        const dstPeerSignallingChannel = this.peerSignallingChannelMap.get(msg.dst)
-        if (dstPeerSignallingChannel) {
-          dstPeerSignallingChannel.send(msgUint8Array);
+        // Forward peer signalling messages
+        const destPeerSignallingChannel = this.peerSignallingChannelMap.get(msg.dst)
+        if (destPeerSignallingChannel) {
+          destPeerSignallingChannel.send(msgUint8Array);
         } else {
           log('signalling channel not open for peer %s', msg.dst)
         }
       })
     }
 
-    channel.addEventListener('signalling-channel', handleSignalllingChannel)
+    channel.addEventListener('signalling-channel', handleSignallingChannel)
   }
 
   async close () {

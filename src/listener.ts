@@ -20,13 +20,13 @@ interface WebRTCDirectListenerOptions extends CreateListenerOptions {
 
 export class WebRTCDirectListener extends EventEmitter<ListenerEvents> implements Listener {
   server?: WebRTCDirectServer | WebRTCDirectSigServer
+
   private multiaddr?: Multiaddr
   private readonly wrtc?: WRTC
   private readonly receiverOptions?: WebRTCReceiverInit
   private readonly handler?: ConnectionHandler
   private readonly upgrader: Upgrader
-
-  signallingEnabled: boolean
+  private readonly signallingEnabled: boolean
 
   constructor (upgrader: Upgrader, signallingEnabled: boolean, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit, handler?: ConnectionHandler) {
     super()

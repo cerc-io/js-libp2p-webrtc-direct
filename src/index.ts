@@ -43,14 +43,13 @@ class WebRTCDirect implements Transport {
   private readonly receiverOptions?: WebRTCReceiverInit
   public wrtc?: WRTC
 
-  peerId?: PeerId
-  upgrader?: Upgrader
-
-  private enableSignalling: boolean
-  private relayPeerId?: String
+  private readonly enableSignalling: boolean
+  private readonly relayPeerId?: String
   private signallingChannel?: RTCDataChannel
+  private peerListener?: WebRTCDirectListener
 
-  peerListener?: WebRTCDirectListener
+  public peerId?: PeerId
+  public upgrader?: Upgrader
 
   constructor (init: WebRTCDirectInit) {
     this.initiatorOptions = init?.initiatorOptions
@@ -102,8 +101,8 @@ class WebRTCDirect implements Transport {
 
     // Otherwise, perform regular dial (relay nodes);
     // Create signalling channel if dialling primary relay node
-    const createSignallingChannel = (this.relayPeerId && ma.getPeerId() === this.relayPeerId)
-    return this._connect(ma, options, createSignallingChannel)
+    const shouldCreateSignallingChannel = (this.relayPeerId && ma.getPeerId() === this.relayPeerId)
+    return this._connect(ma, options, shouldCreateSignallingChannel)
   }
 
   async _dialUsingSignallingChannel (ma: Multiaddr, options: DialOptions) {
@@ -120,7 +119,7 @@ class WebRTCDirect implements Transport {
     return this._connectUsingSignallingChannel(ma, options)
   }
 
-  async _connect (ma: Multiaddr, options: DialOptions, createSignallingChannel = false) {
+  async _connect (ma: Multiaddr, options: DialOptions, shouldCreateSignallingChannel = false) {
     if (options.signal?.aborted === true) {
       throw new AbortError()
     }
@@ -221,7 +220,7 @@ class WebRTCDirect implements Transport {
           host = `[${host}]`
         }
 
-        const path = `/?signal=${base58btc.encode(fromString(signalStr))}&signalling_channel=${createSignallingChannel}`
+        const path = `/?signal=${base58btc.encode(fromString(signalStr))}&signalling_channel=${shouldCreateSignallingChannel}`
         const uri = url + path
 
         try {
@@ -253,8 +252,8 @@ class WebRTCDirect implements Transport {
       })
 
       // Handle the signalling channel if dialling to the relay node and signalling is enabled
-      if (createSignallingChannel) {
-        await this._registerSignalllingChannelHandler(channel, deferredSignallingChannel)
+      if (shouldCreateSignallingChannel) {
+        await this._registerSignallingChannelHandler(channel, deferredSignallingChannel)
 
         // Create signalling channel after handlers have been registered
         this._createSignallingChannel(channel)
@@ -272,8 +271,8 @@ class WebRTCDirect implements Transport {
     }
   }
 
-  async _registerSignalllingChannelHandler (channel: WebRTCInitiator, deferredSignallingChannel: DeferredPromise<void>) {
-    const handleSignalllingChannel = (evt: CustomEvent<RTCDataChannel>) => {
+  async _registerSignallingChannelHandler (channel: WebRTCInitiator, deferredSignallingChannel: DeferredPromise<void>) {
+    const handleSignallingChannel = (evt: CustomEvent<RTCDataChannel>) => {
       const signallingChannel = evt.detail
 
       // Set the signalling channel
@@ -324,7 +323,7 @@ class WebRTCDirect implements Transport {
       })
     }
 
-    channel.addEventListener('signalling-channel', handleSignalllingChannel)
+    channel.addEventListener('signalling-channel', handleSignallingChannel)
   }
 
   async _connectUsingSignallingChannel (ma: Multiaddr, options: DialOptions) {
