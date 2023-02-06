@@ -24,9 +24,9 @@ export interface ConnectResponse {
 
 export type SignallingMessage = JoinRequest | ConnectRequest | ConnectResponse;
 
-// TODO explain
+// Signalling channel type to be set in the http connection request
 export enum SignallingChannelType {
-  None = 'none',
-	Peer = 'peer',
-	Relay = 'relay',
+  None = 'none',    // no signalling channeel
+  Peer = 'peer',    // signalling channel between a peer and its primary relay node
+  Relay = 'relay',  // signalling channel between two relay nodes
 }

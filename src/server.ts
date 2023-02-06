@@ -47,7 +47,6 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
 
   // Start listening using the signalling channel
   registerSignallingChannel (signallingChannel: RTCDataChannel) {
-    console.log('WebRTCDirectSigServer registerSignallingChannel')
     this.signallingChannel = signallingChannel
 
     const handleMessage = (evt: MessageEvent) => {
@@ -75,8 +74,6 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
   }
 
   async processRequest (request: ConnectRequest) {
-    console.log('processRequest from', request.src)
-    // TODO handle request only if not alreay connected to the src peer
     assert(this.signallingChannel)
     const signallingChannel = this.signallingChannel
 
@@ -152,10 +149,12 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
   // Keep track of signalling channels formed to peers by their peer id
   // to forward signalling messages
   private readonly peerSignallingChannelMap: Map<string, RTCDataChannel> = new Map()
-  // TODO Comment
+
+  // Keep track of signalling channels formed to relay peers to forward signalling messages
+  // where the destination peer isn't connected
   private relaySignallngChannels: RTCDataChannel[] = []
 
-  // TODO Comment
+  // Keep a time-cache of signalling messages to avoid already seen messages
   seenCache: Cache<boolean> = new Cache({ defaultTtl: SEEN_CACHE_TTL })
 
   constructor (multiaddr: Multiaddr, signallingEnabled: boolean, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit) {
@@ -190,6 +189,38 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     })
 
     this.server.listen(lOpts)
+  }
+
+  // Register a signalling channel created when dialling to another relay node
+  // (called from dialer)
+  // (need to keep track in the listener to be able to forward signalling messages to all connected relay peers)
+  registerSignallingChannel (signallingChannel: RTCDataChannel) {
+    // Keep track of the signalling channel from another relay node
+    this.relaySignallngChannels.push(signallingChannel);
+
+    const handleMessage = async (evt: MessageEvent) => {
+      const msgUint8Array = new Uint8Array(evt.data)
+      const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
+
+      if (msg.type === 'JoinRequest') {
+        throw new Error('Unexpected JoinRequest over relay signalling channel')
+      }
+
+      await this._handlePeerSignallingMessage(signallingChannel, msgUint8Array, msg.dst)
+    }
+
+    signallingChannel.addEventListener('message', handleMessage)
+
+    const untrackChannel = () => {
+      log('Deregistering closed relay signalling channel')
+      signallingChannel.removeEventListener('message', handleMessage)
+
+      this.relaySignallngChannels = this.relaySignallngChannels.filter(c => c !== signallingChannel)
+    }
+
+    signallingChannel.addEventListener('close', untrackChannel, {
+      once: true
+    })
   }
 
   async processRequest (req: IncomingMessage, res: ServerResponse) {
@@ -295,7 +326,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         }
 
         default:
-          throw new Error(`invalid signalling channel type in the request: ${signallingChannelType}`)
+          throw new Error(`Invalid signalling channel type in the listener request: ${signallingChannelType}`)
       }
     } else {
       // Resolve immediately if signalling not enabled
@@ -310,7 +341,6 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       const signallingChannel = evt.detail
 
       const trackRelaySignallingChannel = () => {
-        console.log('trackRelaySignallingChannel')
         this.relaySignallngChannels.push(signallingChannel);
 
         const untrackChannel = () => {
@@ -321,10 +351,10 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       }
 
       const trackPeerSignallingChannel = (peerId: string) => {
-        console.log('trackPeerSignallingChannel')
         this.peerSignallingChannelMap.set(peerId, signallingChannel)
 
-        // Remove the entry from peerSignallingChannelMap for peer if channel closes or runs into an error
+        // Remove the channel entry from peerSignallingChannelMap for peer
+        // if channel closes or runs into an error
         const untrackChannel = () => {
           this.peerSignallingChannelMap.delete(peerId)
         };
@@ -333,6 +363,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         signallingChannel.addEventListener('error', untrackChannel)
       }
 
+      // Keep track of the signalling channel from another relay node
       if (type === SignallingChannelType.Relay) {
         trackRelaySignallingChannel()
       }
@@ -347,7 +378,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         const msgUint8Array = new Uint8Array(evt.data)
         const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
-        // Add signalling channel to a map on a JoinRequest from a peer
+        // Keep track of the signalling channel in a map on a JoinRequest from a peer
         // (made only once when the channel opens)
         if (msg.type === 'JoinRequest') {
           if (type === SignallingChannelType.Relay) {
@@ -365,41 +396,11 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     channel.addEventListener('signalling-channel', handleSignallingChannel)
   }
 
-  // TODO explain
-  registerSignallingChannel (signallingChannel: RTCDataChannel) {
-    console.log('registerSignallingChannel')
-    this.relaySignallngChannels.push(signallingChannel);
-
-    const handleMessage = async (evt: MessageEvent) => {
-      const msgUint8Array = new Uint8Array(evt.data)
-      const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
-
-      if (msg.type === 'JoinRequest') {
-        throw new Error('Unexpected JoinRequest over relay signalling channel')
-      }
-
-      await this._handlePeerSignallingMessage(signallingChannel, msgUint8Array, msg.dst)
-    }
-
-    signallingChannel.addEventListener('message', handleMessage)
-
-    const untrackChannel = () => {
-      log('deregistering closed relay signalling channel')
-      signallingChannel.removeEventListener('message', handleMessage)
-
-      this.relaySignallngChannels = this.relaySignallngChannels.filter(c => c !== signallingChannel)
-    }
-
-    signallingChannel.addEventListener('close', untrackChannel, {
-      once: true
-    })
-  }
-
   async _handlePeerSignallingMessage (from: RTCDataChannel, msg: Uint8Array, dst: string) {
-    console.log('_handlePeerSignallingMessage', dst)
+    // Check if the message has been already seen in the time-cache
     const isMsgSeen = await this._isMsgSeen(msg)
     if (isMsgSeen) {
-      console.log('isMsgSeen, not forwarding')
+      // Ignore if seen
       return;
     }
 
@@ -419,20 +420,19 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
   }
 
   _forwardSignallingMessage (from: RTCDataChannel, msg: Uint8Array, dst: string) {
-    // Forward peer signalling messages
     const destPeerSignallingChannel = this.peerSignallingChannelMap.get(dst)
+
+    // Forward peer signalling message to its destination if a signalling channel is present
     if (destPeerSignallingChannel) {
-      console.log('destPeerSignallingChannel found')
       destPeerSignallingChannel.send(msg);
     } else {
-      console.log('destPeerSignallingChannel not found', dst)
+      // Otherwise, forward the signalling message to all the connected relay nodes
       this.relaySignallngChannels.forEach(relaySignallingChannel => {
+        // Skip the source
         if (relaySignallingChannel === from) {
-          console.log('forwarding, skipping from')
           return
         }
 
-        console.log('forwarding')
         relaySignallingChannel.send(msg)
       })
     }
@@ -445,6 +445,9 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
 
     // Clear the (peer - signalling channel) mapping
     this.peerSignallingChannelMap.clear()
+
+    // Reset the list of signalling channels to relay peers
+    this.relaySignallngChannels = []
 
     await new Promise<void>((resolve, reject) => {
       this.server.close((err) => {
