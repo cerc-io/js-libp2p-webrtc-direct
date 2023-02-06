@@ -23,3 +23,10 @@ export interface ConnectResponse {
 }
 
 export type SignallingMessage = JoinRequest | ConnectRequest | ConnectResponse;
+
+// TODO explain
+export enum SignallingChannelType {
+  None = 'none',
+	Peer = 'peer',
+	Relay = 'relay',
+}

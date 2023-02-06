@@ -18,8 +18,7 @@ import defer, { DeferredPromise } from 'p-defer'
 import { CODE_CIRCUIT, CODE_P2P, P2P_WEBRTC_STAR_ID } from './constants.js'
 import { toMultiaddrConnection } from './socket-to-conn.js'
 import { createListener, WebRTCDirectListener } from './listener.js'
-import type { ConnectRequest, JoinRequest, SignallingMessage } from './signal-message.js'
-import { WebRTCDirectSigServer } from './server.js'
+import { ConnectRequest, JoinRequest, SignallingChannelType, SignallingMessage } from './signal-message.js'
 
 const log = logger('libp2p:webrtc-direct')
 
@@ -96,16 +95,26 @@ class WebRTCDirect implements Transport {
 
   async _dialWithSignallingEnabled (ma: Multiaddr, options: DialOptions) {
     // Dial using signalling channel if multiaddr being dialled contains webrtc-star id
-    // (peer nodes)
+    // (to peer nodes)
     if (ma.toString().includes(P2P_WEBRTC_STAR_ID)) {
       // Perform dial using signalling channel
       return this._dialUsingSignallingChannel(ma, options)
     }
 
-    // Otherwise, perform regular dial (relay nodes)
-    // Create signalling channel if dialling the primary relay node
-    const shouldCreateSignallingChannel = (this.relayPeerId && ma.getPeerId() === this.relayPeerId)
-    return this._connect(ma, options, shouldCreateSignallingChannel)
+    // Otherwise, perform regular dial
+    // (to relay nodes)
+    let signallingChannelType: SignallingChannelType;
+    if (this.relayPeerId) {
+      // Create peer signalling channel if dialling the primary relay node
+      signallingChannelType = (ma.getPeerId() === this.relayPeerId)
+      ? SignallingChannelType.Peer
+      : SignallingChannelType.None;
+    } else {
+      // Create relay signalling channel if dialling from one relay node to another
+      signallingChannelType = SignallingChannelType.Relay;
+    }
+
+    return this._connect(ma, options, signallingChannelType)
   }
 
   async _dialUsingSignallingChannel (ma: Multiaddr, options: DialOptions) {
@@ -122,7 +131,8 @@ class WebRTCDirect implements Transport {
     return this._connectUsingSignallingChannel(ma, options)
   }
 
-  async _connect (ma: Multiaddr, options: DialOptions, shouldCreateSignallingChannel = false) {
+  async _connect (ma: Multiaddr, options: DialOptions, signallingChannelType = SignallingChannelType.None) {
+    console.log('_connect', signallingChannelType)
     if (options.signal?.aborted === true) {
       throw new AbortError()
     }
@@ -225,7 +235,7 @@ class WebRTCDirect implements Transport {
           url = `http://${host}:${cOpts.port}`
         }
 
-        const path = `/?signal=${base58btc.encode(fromString(signalStr))}&signalling_channel=${shouldCreateSignallingChannel}`
+        const path = `/?signal=${base58btc.encode(fromString(signalStr))}&signalling_channel=${signallingChannelType}`
         const uri = url + path
 
         try {
@@ -256,16 +266,26 @@ class WebRTCDirect implements Transport {
         })
       })
 
-      // Handle the signalling channel if dialling to the primary relay node and signalling is enabled
-      if (shouldCreateSignallingChannel) {
-        // Handle signalling-channel event on channel
-        await this._registerSignallingChannelHandler(channel, deferredSignallingChannel)
+      switch (signallingChannelType) {
+        case SignallingChannelType.None: {
+          // Resolve immediately if signalling channel is not being created
+          // (signalling is not enabled or dialling to a secondary relay node)
+          deferredSignallingChannel.resolve()
+          break;
+        }
 
-        // Create signalling channel after handlers have been registered
-        this._createSignallingChannel(channel)
-      } else {
-        // Resolve immediately if not dialling to the primary relay node or signalling is not enabled
-        deferredSignallingChannel.resolve()
+        case SignallingChannelType.Peer:
+        case SignallingChannelType.Relay: {
+          // Handle the signalling channel if signalling channel is being created
+          // (signalling is enabled;
+          //  dialling to the primary relay node from a peer node or
+          //  dialling to a relay node from a relay node)
+          await this._registerSignallingChannelHandler(channel, deferredSignallingChannel, signallingChannelType)
+
+          // Create signalling channel after handlers have been registered
+          this._createSignallingChannel(channel)
+          break;
+        }
       }
     })
   }
@@ -277,31 +297,33 @@ class WebRTCDirect implements Transport {
     }
   }
 
-  async _registerSignallingChannelHandler (channel: WebRTCInitiator, deferredSignallingChannel: DeferredPromise<void>) {
+  async _registerSignallingChannelHandler (channel: WebRTCInitiator, deferredSignallingChannel: DeferredPromise<void>, type: SignallingChannelType) {
     const handleSignallingChannel = (evt: CustomEvent<RTCDataChannel>) => {
       const signallingChannel = evt.detail
 
-      // Set the signalling channel for this peer
-      this.signallingChannel = signallingChannel
-
-      assert(this.peerId)
-      const peerIdString = this.peerId.toString()
-
       signallingChannel.addEventListener('open', () => {
-        // Send a JoinRequest message when the signalling channel opens
-        const request: JoinRequest = {
-          type: 'JoinRequest',
-          peerId: peerIdString
-        };
+        console.log('signallingChannel open')
+        // For signalling channels from peer to relay nodes
+        if (type === SignallingChannelType.Peer) {
+          // Set the signalling channel for this peer
+          this.signallingChannel = signallingChannel
 
-        const msg = uint8ArrayFromString(JSON.stringify(request))
-        signallingChannel.send(msg)
+          // Send a JoinRequest message when it opens
+          assert(this.peerId)
+          const request: JoinRequest = {
+            type: 'JoinRequest',
+            peerId: this.peerId.toString()
+          };
 
-        // Start listening using the signalling channel
+          const msg = uint8ArrayFromString(JSON.stringify(request))
+          signallingChannel.send(msg)
+        }
+
+        // Register signalling channel with the listener
         // (this.peerListener is set in this.createListener which is called for the provided listen address)
-        // (only single listen address supported for peer nodes)
-        if (this.peerListener?.server instanceof WebRTCDirectSigServer) {
-          this.peerListener.server.init(signallingChannel)
+        // (only single listen address supported for now)
+        if (this.peerListener?.server) {
+          this.peerListener.server.registerSignallingChannel(signallingChannel)
         }
 
         // Resolve deferredSignallingChannel promise
@@ -310,6 +332,9 @@ class WebRTCDirect implements Transport {
 
       signallingChannel.addEventListener('close', () => {
         log('signalling channel closed')
+
+        // Unset the signalling channel for this peer
+        delete this.signallingChannel
 
         // Open a new signalling channel if peer connection still exists
         this._createSignallingChannel(channel)
@@ -335,6 +360,7 @@ class WebRTCDirect implements Transport {
   }
 
   async _connectUsingSignallingChannel (ma: Multiaddr, options: DialOptions) {
+    console.log('_connectUsingSignallingChannel')
     assert(this.peerId)
     const peerId = this.peerId
 
@@ -432,6 +458,7 @@ class WebRTCDirect implements Transport {
             dst: dstPeerId,
             signal: signalStr
           };
+          console.log('sending a connect request to', request.dst)
           signallingChannel.send(uint8ArrayFromString(JSON.stringify(request)));
 
           // Wait for response message over the signalling channel
@@ -446,6 +473,7 @@ class WebRTCDirect implements Transport {
                   msg.src === dstPeerId &&
                   msg.dst === peerId.toString()
                 ) {
+                  console.log('got a connect response from', msg.src)
                   // Remove this handler after receiving the response
                   signallingChannel.removeEventListener('message', onMessage);
                   resolve(msg.signal)
@@ -505,6 +533,7 @@ class WebRTCDirect implements Transport {
 
       // ma can be a listen multiaddr or another node's multiaddr that's being dialled
 
+      // TODO Update desc
       // Additional check on the relay peer id for addresses having webrtc-star id
       // Eg. Listen address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWRxmi5GXThHcLzadFGS7KWwMmYMsVpMjZpbgV6QQ1Cd68/p2p-webrtc-star)
       // Eg. Peer address (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWENbU4KTaLgfdQVC5Ths6EewQJjYo4AjtPx2ykRrooT51/p2p-webrtc-star/p2p/12D3KooWBdPEfKR3MdA4L9BhJJ1RcDFK3XCgJ4bLx4kAJow1i8fg)
@@ -524,7 +553,7 @@ class WebRTCDirect implements Transport {
         // Decapsulate for peer addresses and then perform the same checks as above
         // Eg. Decapsulated multiaddr (/ip4/0.0.0.0/tcp/9090/http/p2p-webrtc-direct/p2p/12D3KooWENbU4KTaLgfdQVC5Ths6EewQJjYo4AjtPx2ykRrooT51/p2p-webrtc-star)
         const decapsulated = ma.decapsulateCode(CODE_P2P)
-        return mafmt.WebRTCDirect.matches(decapsulated.decapsulateCode(CODE_P2P)) && decapsulated.getPeerId() === this.relayPeerId
+        return mafmt.WebRTCDirect.matches(decapsulated.decapsulateCode(CODE_P2P))
       }
 
       // Addresses without webrtc-star id

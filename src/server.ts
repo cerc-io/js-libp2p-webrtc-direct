@@ -13,9 +13,12 @@ import { Signal, WebRTCReceiver, WebRTCReceiverInit, WRTC } from '@cerc-io/webrt
 import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
 import { fromString as uint8ArrayFromString } from 'uint8arrays/from-string';
 import defer, { DeferredPromise } from 'p-defer'
+import Cache from 'timed-cache'
+import { sha256 } from 'multiformats/hashes/sha2'
 
 import { http } from './http-server.js'
-import type { ConnectRequest, ConnectResponse, SignallingMessage } from './signal-message.js'
+import { ConnectRequest, ConnectResponse, SignallingChannelType, SignallingMessage } from './signal-message.js'
+import { SEEN_CACHE_TTL } from './constants.js'
 
 const log = logger('libp2p:webrtc-direct:listener')
 
@@ -42,7 +45,9 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
     this.receiverOptions = receiverOptions
   }
 
-  init (signallingChannel: RTCDataChannel) {
+  // Start listening using the signalling channel
+  registerSignallingChannel (signallingChannel: RTCDataChannel) {
+    console.log('WebRTCDirectSigServer registerSignallingChannel')
     this.signallingChannel = signallingChannel
 
     const handleMessage = (evt: MessageEvent) => {
@@ -70,6 +75,8 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
   }
 
   async processRequest (request: ConnectRequest) {
+    console.log('processRequest from', request.src)
+    // TODO handle request only if not alreay connected to the src peer
     assert(this.signallingChannel)
     const signallingChannel = this.signallingChannel
 
@@ -145,6 +152,11 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
   // Keep track of signalling channels formed to peers by their peer id
   // to forward signalling messages
   private readonly peerSignallingChannelMap: Map<string, RTCDataChannel> = new Map()
+  // TODO Comment
+  private relaySignallngChannels: RTCDataChannel[] = []
+
+  // TODO Comment
+  seenCache: Cache<boolean> = new Cache({ defaultTtl: SEEN_CACHE_TTL })
 
   constructor (multiaddr: Multiaddr, signallingEnabled: boolean, wrtc?: WRTC, receiverOptions?: WebRTCReceiverInit) {
     super()
@@ -198,7 +210,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
 
     const url = new URL(requestUrl, `http://${remoteHost}`)
     const incSignalStr = url.searchParams.get('signal')
-    const shouldCreateSignallingChannel = url.searchParams.get('signalling_channel') === 'true'
+    const signallingChannelType = url.searchParams.get('signalling_channel')
 
     if (incSignalStr == null) {
       const err = new Error('Invalid listener request. Signal not found.')
@@ -266,10 +278,25 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       this.dispatchEvent(new CustomEvent('connection', { detail: maConn }))
     })
 
-    // Handle the signalling channel if specified in the request and signalling is enabled
-    if (this.signallingEnabled && shouldCreateSignallingChannel) {
-      // Handle signalling-channel event on channel
-      await this._registerSignallingChannelHandler(channel, deferredSignallingChannel)
+    // Handle the signalling channel if signalling is enabled and specified in the request
+    if (this.signallingEnabled) {
+      switch (signallingChannelType) {
+        case SignallingChannelType.None: {
+          // Resolve immediately if signalling channel not requested
+          deferredSignallingChannel.resolve()
+          break
+        }
+
+        case SignallingChannelType.Peer:
+        case SignallingChannelType.Relay: {
+          // Handle signalling-channel event on channel
+          await this._registerSignallingChannelHandler(channel, deferredSignallingChannel, signallingChannelType)
+          break
+        }
+
+        default:
+          throw new Error(`invalid signalling channel type in the request: ${signallingChannelType}`)
+      }
     } else {
       // Resolve immediately if signalling not enabled
       deferredSignallingChannel.resolve()
@@ -278,9 +305,37 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     channel.handleSignal(incSignal)
   }
 
-  async _registerSignallingChannelHandler (channel: WebRTCReceiver, deferredSignallingChannel: DeferredPromise<void>) {
+  async _registerSignallingChannelHandler (channel: WebRTCReceiver, deferredSignallingChannel: DeferredPromise<void>, type: SignallingChannelType) {
     const handleSignallingChannel = (evt: CustomEvent<RTCDataChannel>) => {
       const signallingChannel = evt.detail
+
+      const trackRelaySignallingChannel = () => {
+        console.log('trackRelaySignallingChannel')
+        this.relaySignallngChannels.push(signallingChannel);
+
+        const untrackChannel = () => {
+          this.relaySignallngChannels = this.relaySignallngChannels.filter(s => s !== signallingChannel)
+        };
+        signallingChannel.addEventListener('close', untrackChannel)
+        signallingChannel.addEventListener('error', untrackChannel)
+      }
+
+      const trackPeerSignallingChannel = (peerId: string) => {
+        console.log('trackPeerSignallingChannel')
+        this.peerSignallingChannelMap.set(peerId, signallingChannel)
+
+        // Remove the entry from peerSignallingChannelMap for peer if channel closes or runs into an error
+        const untrackChannel = () => {
+          this.peerSignallingChannelMap.delete(peerId)
+        };
+
+        signallingChannel.addEventListener('close', untrackChannel)
+        signallingChannel.addEventListener('error', untrackChannel)
+      }
+
+      if (type === SignallingChannelType.Relay) {
+        trackRelaySignallingChannel()
+      }
 
       // Resolve deferredSignallingChannel promise when signalling channel opens
       signallingChannel.addEventListener('open', () => {
@@ -288,37 +343,99 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       })
 
       // Handle signalling messages from peers
-      signallingChannel.addEventListener('message', (evt: MessageEvent) => {
+      signallingChannel.addEventListener('message', async (evt: MessageEvent) => {
         const msgUint8Array = new Uint8Array(evt.data)
         const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
 
-        // Add signalling channel to a map on a JoinRequest
+        // Add signalling channel to a map on a JoinRequest from a peer
         // (made only once when the channel opens)
         if (msg.type === 'JoinRequest') {
-          this.peerSignallingChannelMap.set(msg.peerId, signallingChannel)
+          if (type === SignallingChannelType.Relay) {
+            throw new Error('Unexpected JoinRequest over relay signalling channel')
+          }
 
-          // Remove the entry from peerSignallingChannelMap for peer if channel closes or runs into an error
-          const handleChannelCloseOrError = () => {
-            this.peerSignallingChannelMap.delete(msg.peerId)
-          };
-
-          signallingChannel.addEventListener('close', handleChannelCloseOrError)
-          signallingChannel.addEventListener('error', handleChannelCloseOrError)
-
+          trackPeerSignallingChannel(msg.peerId)
           return
         }
 
-        // Forward peer signalling messages
-        const destPeerSignallingChannel = this.peerSignallingChannelMap.get(msg.dst)
-        if (destPeerSignallingChannel) {
-          destPeerSignallingChannel.send(msgUint8Array);
-        } else {
-          log('signalling channel not open for peer %s', msg.dst)
-        }
+        await this._handlePeerSignallingMessage(signallingChannel, msgUint8Array, msg.dst)
       })
     }
 
     channel.addEventListener('signalling-channel', handleSignallingChannel)
+  }
+
+  // TODO explain
+  registerSignallingChannel (signallingChannel: RTCDataChannel) {
+    console.log('registerSignallingChannel')
+    this.relaySignallngChannels.push(signallingChannel);
+
+    const handleMessage = async (evt: MessageEvent) => {
+      const msgUint8Array = new Uint8Array(evt.data)
+      const msg: SignallingMessage = JSON.parse(uint8ArrayToString(msgUint8Array))
+
+      if (msg.type === 'JoinRequest') {
+        throw new Error('Unexpected JoinRequest over relay signalling channel')
+      }
+
+      await this._handlePeerSignallingMessage(signallingChannel, msgUint8Array, msg.dst)
+    }
+
+    signallingChannel.addEventListener('message', handleMessage)
+
+    const untrackChannel = () => {
+      log('deregistering closed relay signalling channel')
+      signallingChannel.removeEventListener('message', handleMessage)
+
+      this.relaySignallngChannels = this.relaySignallngChannels.filter(c => c !== signallingChannel)
+    }
+
+    signallingChannel.addEventListener('close', untrackChannel, {
+      once: true
+    })
+  }
+
+  async _handlePeerSignallingMessage (from: RTCDataChannel, msg: Uint8Array, dst: string) {
+    console.log('_handlePeerSignallingMessage', dst)
+    const isMsgSeen = await this._isMsgSeen(msg)
+    if (isMsgSeen) {
+      console.log('isMsgSeen, not forwarding')
+      return;
+    }
+
+    this._forwardSignallingMessage(from, msg, dst)
+  }
+
+  async _isMsgSeen (msg: Uint8Array) {
+    const msgEncoded = await sha256.encode(msg)
+    const msgIdStr = toString(msgEncoded, 'base64')
+
+    if (this.seenCache.get(msgIdStr)) {
+      return true
+    }
+
+    this.seenCache.put(msgIdStr, true)
+    return false
+  }
+
+  _forwardSignallingMessage (from: RTCDataChannel, msg: Uint8Array, dst: string) {
+    // Forward peer signalling messages
+    const destPeerSignallingChannel = this.peerSignallingChannelMap.get(dst)
+    if (destPeerSignallingChannel) {
+      console.log('destPeerSignallingChannel found')
+      destPeerSignallingChannel.send(msg);
+    } else {
+      console.log('destPeerSignallingChannel not found', dst)
+      this.relaySignallngChannels.forEach(relaySignallingChannel => {
+        if (relaySignallingChannel === from) {
+          console.log('forwarding, skipping from')
+          return
+        }
+
+        console.log('forwarding')
+        relaySignallingChannel.send(msg)
+      })
+    }
   }
 
   async close () {
