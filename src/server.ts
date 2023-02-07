@@ -150,7 +150,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
 
   // Keep track of signalling channels formed to relay peers to forward signalling messages
   // where the destination peer isn't connected
-  private relaySignallngChannels: RTCDataChannel[] = []
+  private relaySignallingChannels: RTCDataChannel[] = []
 
   // Keep a time-cache of signalling messages to avoid already seen messages
   seenCache: Cache<boolean> = new Cache({ defaultTtl: SEEN_CACHE_TTL })
@@ -194,7 +194,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
   // (need to keep track in the listener to be able to forward signalling messages to all connected relay peers)
   registerSignallingChannel (signallingChannel: RTCDataChannel) {
     // Keep track of the signalling channel from another relay node
-    this.relaySignallngChannels.push(signallingChannel)
+    this.relaySignallingChannels.push(signallingChannel)
 
     const handleMessage = (evt: MessageEvent) => {
       void (async () => {
@@ -215,7 +215,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       log('Deregistering closed relay signalling channel')
       signallingChannel.removeEventListener('message', handleMessage)
 
-      this.relaySignallngChannels = this.relaySignallngChannels.filter(c => c !== signallingChannel)
+      this.relaySignallingChannels = this.relaySignallingChannels.filter(c => c !== signallingChannel)
     }
 
     signallingChannel.addEventListener('close', untrackChannel, {
@@ -347,10 +347,10 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       const signallingChannel = evt.detail
 
       const trackRelaySignallingChannel = () => {
-        this.relaySignallngChannels.push(signallingChannel)
+        this.relaySignallingChannels.push(signallingChannel)
 
         const untrackChannel = () => {
-          this.relaySignallngChannels = this.relaySignallngChannels.filter(s => s !== signallingChannel)
+          this.relaySignallingChannels = this.relaySignallingChannels.filter(s => s !== signallingChannel)
         }
         signallingChannel.addEventListener('close', untrackChannel)
         signallingChannel.addEventListener('error', untrackChannel)
@@ -435,7 +435,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       destPeerSignallingChannel.send(msg)
     } else {
       // Otherwise, forward the signalling message to all the connected relay nodes
-      this.relaySignallngChannels.forEach(relaySignallingChannel => {
+      this.relaySignallingChannels.forEach(relaySignallingChannel => {
         // Skip the source
         if (relaySignallingChannel === from) {
           return
@@ -455,7 +455,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     this.peerSignallingChannelMap.clear()
 
     // Reset the list of signalling channels to relay peers
-    this.relaySignallngChannels = []
+    this.relaySignallingChannels = []
 
     await new Promise<void>((resolve, reject) => {
       this.server.close((err) => {

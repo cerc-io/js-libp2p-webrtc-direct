@@ -22,11 +22,17 @@ const log = logger('libp2p:webrtc-direct')
 
 export { P2P_WEBRTC_STAR_ID } from './constants.js'
 
+export enum WebRTCDirectNodeType {
+  Peer,
+  Relay
+}
+
 export interface WebRTCDirectInit {
   wrtc?: WRTC
   initiatorOptions?: WebRTCInitiatorInit
   receiverOptions?: WebRTCReceiverInit
   enableSignalling: boolean
+  nodeType?: WebRTCDirectNodeType
   relayPeerId?: String
 }
 
@@ -41,6 +47,7 @@ class WebRTCDirect implements Transport {
   public wrtc?: WRTC
 
   private readonly enableSignalling: boolean
+  private readonly nodeType: WebRTCDirectNodeType
   private readonly relayPeerId?: String
   private signallingChannel?: RTCDataChannel
   private peerListener?: WebRTCDirectListener
@@ -54,10 +61,19 @@ class WebRTCDirect implements Transport {
     this.wrtc = init?.wrtc
 
     this.enableSignalling = init.enableSignalling
+    this.nodeType = init.nodeType ?? WebRTCDirectNodeType.Peer
+
+    this.relayPeerId = init?.relayPeerId
 
     // Peer nodes need to set the peer id of the relay node with which the signalling channel is to be established
     // No need to set in case of relay nodes
-    this.relayPeerId = init?.relayPeerId
+    if (
+      this.enableSignalling &&
+      this.nodeType === WebRTCDirectNodeType.Peer &&
+      this.relayPeerId == null
+    ) {
+      throw new Error('Primary relay peer id not set for peer node')
+    }
   }
 
   get [symbol] (): true {
@@ -102,7 +118,7 @@ class WebRTCDirect implements Transport {
     // Otherwise, perform regular dial
     // (to relay nodes)
     let signallingChannelType: SignallingChannelType
-    if (this.relayPeerId != null) {
+    if (this.nodeType === WebRTCDirectNodeType.Peer) {
       // Create peer signalling channel if dialling the primary relay node
       signallingChannelType = (ma.getPeerId() === this.relayPeerId)
         ? SignallingChannelType.Peer
@@ -117,13 +133,11 @@ class WebRTCDirect implements Transport {
 
   async _dialUsingSignallingChannel (ma: Multiaddr, options: DialOptions) {
     // Expect relayPeerId to be set
-    if (this.relayPeerId == null) {
-      throw new Error('primary relay peer id not set')
-    }
+    assert(this.relayPeerId != null)
 
     // Expect signalling channel to exist and connect using signalling channel
     if (this.signallingChannel == null) {
-      throw new Error('signalling channel does not exist to primary relay node')
+      throw new Error('Signalling channel does not exist to primary relay node')
     }
 
     return await this._connectUsingSignallingChannel(ma, options)
