@@ -111,8 +111,8 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
     })
     channel.addEventListener('ready', () => {
       const maConn = toMultiaddrConnection(channel, {
-        // Form the multiaddr for remote peer by appending it's peer id to the listening multiaddr
-        remoteAddr: multiaddr(`${this.multiAddr.toString()}/p2p/${request.src}`)
+        // Form the multiaddr for this peer by appending it's peer id to the listening multiaddr
+        remoteAddr: multiaddr(`${this.multiAddr.toString()}/p2p/${request.dst}`)
       })
       log('new inbound connection %s', maConn.remoteAddr)
 
