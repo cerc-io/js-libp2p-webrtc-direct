@@ -7,10 +7,17 @@ import { isBrowser } from 'wherearewe'
 import { pipe } from 'it-pipe'
 import { pEvent } from 'p-event'
 import type { Transport } from '@libp2p/interface-transport'
+import type { Connection } from '@libp2p/interface-connection'
+import type { PeerId } from '@libp2p/interface-peer-id'
+import defer from 'p-defer'
+
+import { P2P_WEBRTC_STAR_ID } from '../src/constants.js'
+import { peerIdFromString } from '@libp2p/peer-id'
 
 const ECHO_PROTOCOL = '/echo/1.0.0'
+const REMOTE_MULTIADDR_IP4_PEER = multiaddr('/ip4/127.0.0.1/tcp/12345/http/p2p-webrtc-direct/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a')
 
-export default (create: () => Promise<Transport>) => {
+export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
   describe('listen', function () {
     this.timeout(20 * 1000)
 
@@ -183,6 +190,205 @@ export default (create: () => Promise<Transport>) => {
       expect(conn.remoteAddr).to.exist()
 
       await conn.close()
+      await listener1.close()
+    })
+  })
+
+  describe('listen using signalling channel', function () {
+    this.timeout(20 * 1000)
+
+    const registrar = mockRegistrar()
+    const upgrader = mockUpgrader({ registrar })
+    let wd: Transport
+    let conn: Connection
+
+    const listenMultiaddr = multiaddr(`${REMOTE_MULTIADDR_IP4_PEER.toString()}/${P2P_WEBRTC_STAR_ID}`)
+
+    before(async () => {
+      wd = await create()
+    })
+
+    afterEach(async () => {
+      await conn.close()
+    })
+
+    it('listen, check for promise', async () => {
+      const listener = wd.createListener({
+        upgrader: mockUpgrader()
+      })
+
+      await listener.listen(listenMultiaddr)
+      conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      await listener.close()
+    })
+
+    it('listen, check for listening event', async () => {
+      const listener = wd.createListener({
+        upgrader: mockUpgrader()
+      })
+
+      const eventPromise = defer()
+
+      listener.addEventListener('listening', () => {
+        void listener.close()
+          .then(eventPromise.resolve)
+      }, {
+        once: true
+      })
+
+      await listener.listen(listenMultiaddr)
+      await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      await eventPromise.promise
+    })
+
+    it('listen, check for the close event', async () => {
+      const listener = wd.createListener({
+        upgrader: mockUpgrader()
+      })
+
+      const eventPromise = defer()
+
+      void listener.listen(listenMultiaddr).then(async () => {
+        listener.addEventListener('close', () => eventPromise.resolve(), {
+          once: true
+        })
+        await listener.close()
+      })
+      conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      await eventPromise.promise
+    })
+
+    it('getAddrs', async () => {
+      const listener = wd.createListener({
+        upgrader: mockUpgrader()
+      })
+
+      await listener.listen(listenMultiaddr)
+      conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      const addrs = listener.getAddrs()
+      expect(addrs[0]).to.deep.equal(listenMultiaddr)
+
+      await listener.close()
+    })
+
+    it('should untrack conn after being closed', async function () {
+      const listenMultiaddr1 = listenMultiaddr
+      const registrar = mockRegistrar()
+      void registrar.handle(ECHO_PROTOCOL, ({ stream }) => {
+        void pipe(
+          stream,
+          stream
+        )
+      })
+      const upgrader = mockUpgrader({
+        registrar
+      })
+
+      const listener = wd.createListener({
+        upgrader
+      })
+
+      await listener.listen(listenMultiaddr)
+      await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      // Wait for peer to join signalling network
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000)
+      })
+
+      const peerId1 = peerIdFromString('QmP7kBSdTjivW1e8zMnjUHkHCYFzVMuN14ycqyoRz3aJor')
+      const wd1 = await create(peerId1)
+      const listener1 = wd1.createListener({
+        upgrader
+      })
+
+      await listener1.listen(listenMultiaddr1)
+      conn = await wd1.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      // Wait for peer to join signalling network
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000)
+      })
+
+      expect(listener1).to.have.nested.property('server.channels').that.has.lengthOf(0)
+
+      const dialAddress1 = multiaddr(`${listenMultiaddr1.toString()}/p2p/${peerId1.toString()}`)
+      const connToNewPeer = await wd.dial(dialAddress1, {
+        upgrader
+      })
+
+      // wait for listener to know of the connect
+      await pEvent(listener1, 'connection')
+
+      expect(listener1).to.have.nested.property('server.channels').that.has.lengthOf(1)
+
+      await connToNewPeer.close()
+
+      // wait for listener to know of the disconnect
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1000)
+      })
+
+      expect(listener1).to.have.nested.property('server.channels').that.has.lengthOf(0)
+
+      await listener.close()
+      await listener1.close()
+    })
+
+    it('should have remoteAddress in listener connection', async function () {
+      const listenMultiaddr1 = listenMultiaddr
+      const registrar = mockRegistrar()
+      void registrar.handle(ECHO_PROTOCOL, ({ stream }) => {
+        void pipe(
+          stream,
+          stream
+        )
+      })
+      const upgrader = mockUpgrader({
+        registrar
+      })
+
+      const listener = wd.createListener({
+        upgrader
+      })
+
+      await listener.listen(listenMultiaddr)
+      await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      // Wait for peer to join signalling network
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000)
+      })
+
+      const peerId1 = peerIdFromString('QmP7kBSdTjivW1e8zMnjUHkHCYFzVMuN14ycqyoRz3aJor')
+      const wd1 = await create(peerId1)
+      const listener1 = wd1.createListener({
+        handler: (conn) => {
+          expect(conn.remoteAddr).to.exist()
+        },
+        upgrader
+      })
+
+      await listener1.listen(listenMultiaddr1)
+      conn = await wd1.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      // Wait for peer to join signalling network
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2000)
+      })
+
+      const dialAddress1 = multiaddr(`${listenMultiaddr1.toString()}/p2p/${peerId1.toString()}`)
+      const connToNewPeer = await wd.dial(dialAddress1, {
+        upgrader
+      })
+      expect(connToNewPeer.remoteAddr).to.exist()
+
+      await connToNewPeer.close()
+      await listener.close()
       await listener1.close()
     })
   })

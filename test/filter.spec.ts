@@ -5,6 +5,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { peerIdFromString } from '@libp2p/peer-id'
 import { webRTCDirect } from '../src/index.js'
 
+// TODO Update
 describe('filter', () => {
   const peerId = peerIdFromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a')
   it('filters non valid webrtc-direct multiaddrs', () => {

@@ -9,7 +9,7 @@ process.on('beforeExit', (code) => process.exit(code))
 const ECHO_PROTOCOL = '/echo/1.0.0'
 
 async function before () {
-  const { webRTCDirect } = await import('./dist/src/index.js')
+  const { webRTCDirect, WebRTCDirectNodeType } = await import('./dist/src/index.js')
   const { pipe } = await import('it-pipe')
   const { multiaddr } = await import('@multiformats/multiaddr')
   const { mockUpgrader, mockRegistrar } = await import('@libp2p/interface-mocks')
@@ -31,7 +31,9 @@ async function before () {
 
   const peerId = peerIdFromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a')
   const wd = webRTCDirect({
-    wrtc
+    wrtc,
+    enableSignalling: true,
+    nodeType: WebRTCDirectNodeType.Relay
   })({
     peerId: peerId
   })

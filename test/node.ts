@@ -12,13 +12,16 @@ import { webRTCDirect } from '../src/index.js'
 process.on('beforeExit', (code) => process.exit(code))
 
 describe('transport: with wrtc', () => {
-  const peerId = peerIdFromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a')
-  const create = async () => {
+  const peerId = peerIdFromString('QmWeo5ZWjC7mVDNsbBub6WfcuT3MktVuKF7MMBXKrTMCsE')
+  const signallingPeerId = peerIdFromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a')
+
+  const create = async (peerIdArg = peerId) => {
     const ws = webRTCDirect({
       wrtc,
-      enableSignalling: false
+      enableSignalling: true,
+      relayPeerId: signallingPeerId.toString()
     })({
-      peerId
+      peerId: peerIdArg
     })
 
     return ws
