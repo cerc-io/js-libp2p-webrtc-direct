@@ -131,7 +131,7 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
 
   async close () {
     await Promise.all(
-      this.channels.map(async channel => await channel.close())
+      this.channels.map(async (channel) => await channel.close())
     )
   }
 }
@@ -419,7 +419,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
     const msgEncoded = await sha256.encode(msg)
     const msgIdStr = uint8ArrayToString(msgEncoded, 'base64')
 
-    if (this.seenCache.get(msgIdStr) == null) {
+    if (this.seenCache.get(msgIdStr) != null) {
       return true
     }
 
