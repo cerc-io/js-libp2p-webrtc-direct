@@ -456,7 +456,6 @@ class WebRTCDirect implements Transport {
             dst: dstPeerId,
             signal: signalStr
           }
-          signallingChannel.send(uint8ArrayFromString(JSON.stringify(request)))
 
           // Wait for response message over the signalling channel
           const responseSignalJson = await new Promise<string>((resolve, reject) => {
@@ -478,8 +477,9 @@ class WebRTCDirect implements Transport {
                 reject(err)
               }
             }
-
             signallingChannel.addEventListener('message', onMessage)
+
+            signallingChannel.send(uint8ArrayFromString(JSON.stringify(request)))
           })
 
           const responseSignal = JSON.parse(responseSignalJson)
