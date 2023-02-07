@@ -22,4 +22,11 @@ export interface ConnectResponse {
   signal: string
 }
 
-export type SignallingMessage = JoinRequest | ConnectRequest | ConnectResponse;
+export type SignallingMessage = JoinRequest | ConnectRequest | ConnectResponse
+
+// Signalling channel type to be set in the http connection request
+export enum SignallingChannelType {
+  None = 'none', // no signalling channel
+  Peer = 'peer', // signalling channel between a peer and its primary relay node
+  Relay = 'relay', // signalling channel between two relay nodes
+}
