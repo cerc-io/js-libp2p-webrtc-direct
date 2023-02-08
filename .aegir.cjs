@@ -11,12 +11,9 @@ const ECHO_PROTOCOL = '/echo/1.0.0'
 async function before () {
   const { webRTCDirect, WebRTCDirectNodeType } = await import('./dist/src/index.js')
   const { pipe } = await import('it-pipe')
-  const { multiaddr } = await import('@multiformats/multiaddr')
   const { mockUpgrader, mockRegistrar } = await import('@libp2p/interface-mocks')
   const { peerIdFromString } = await import('@libp2p/peer-id')
-
-  const REMOTE_MULTIADDR_IP4 = multiaddr('/ip4/127.0.0.1/tcp/12345/http/p2p-webrtc-direct')
-  const REMOTE_MULTIADDR_IP6 = multiaddr('/ip6/::1/tcp/12346/http/p2p-webrtc-direct')
+  const { REMOTE_MULTIADDR_IP4, REMOTE_MULTIADDR_IP6 } = await import('./dist/test/constants.js')
 
   const registrar = mockRegistrar()
   void registrar.handle(ECHO_PROTOCOL, ({ stream }) => {
