@@ -254,7 +254,32 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       })
       conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
 
+      // Wait for close event
       await eventPromise.promise
+    })
+
+    it('listen, check for the close event on closing signalling node connection', async () => {
+      const listener = wd.createListener({ upgrader })
+
+      const eventPromise = defer()
+
+      await listener.listen(listenMultiaddr).then(async () => {
+        listener.addEventListener('close', () => eventPromise.resolve(), {
+          once: true
+        })
+      })
+      conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+
+      // Close connect to signalling node after 1 sec
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      await conn.close()
+
+      // Wait for close event
+      await eventPromise.promise
+
+      // Wait for listener addrs to be updated
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(listener.getAddrs()).to.be.empty()
     })
 
     it('getAddrs', async () => {
