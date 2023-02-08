@@ -236,7 +236,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       })
 
       await listener.listen(listenMultiaddr)
-      await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+      conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
 
       await eventPromise.promise
     })
@@ -280,6 +280,8 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       // Wait for listener addrs to be updated
       await new Promise((resolve) => setTimeout(resolve, 100))
       expect(listener.getAddrs()).to.be.empty()
+
+      await listener.close()
     })
 
     it('getAddrs', async () => {
@@ -307,7 +309,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       const listener = wd.createListener({ upgrader })
 
       await listener.listen(listenMultiaddr)
-      await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+      conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
 
       // Wait for peer to join signalling network
       await new Promise((resolve) => setTimeout(resolve, 2000))
@@ -316,7 +318,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       const listener1 = wd1.createListener({ upgrader })
 
       await listener1.listen(listenMultiaddr)
-      conn = await wd1.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+      const conn1 = await wd1.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
 
       // Wait for peer to join signalling network
       await new Promise((resolve) => setTimeout(resolve, 2000))
@@ -337,6 +339,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
 
       await listener.close()
       await listener1.close()
+      await conn1.close()
     })
 
     it('should have remoteAddress in listener connection', async function () {
@@ -352,7 +355,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       const listener = wd.createListener({ upgrader })
 
       await listener.listen(listenMultiaddr)
-      await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+      conn = await wd.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
 
       // Wait for peer to join signalling network
       await new Promise((resolve) => setTimeout(resolve, 2000))
@@ -366,7 +369,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       })
 
       await listener1.listen(listenMultiaddr)
-      conn = await wd1.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
+      const conn1 = await wd1.dial(REMOTE_MULTIADDR_IP4_PEER, { upgrader })
 
       // Wait for peer to join signalling network
       await new Promise((resolve) => setTimeout(resolve, 2000))
@@ -377,6 +380,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
       await connToNewPeer.close()
       await listener.close()
       await listener1.close()
+      await conn1.close()
     })
   })
 }
