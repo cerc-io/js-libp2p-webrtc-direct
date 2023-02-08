@@ -44,15 +44,15 @@ export class WebRTCDirectListener extends EventEmitter<ListenerEvents> implement
       throw errCode(new Error('listener already in use'), 'ERR_ALREADY_LISTENING')
     }
 
-    this.multiaddr = multiaddr
-
     const disPatchListeningEvent = () => {
+      // Set this.multiaddr only when emitting listening event
+      this.multiaddr = multiaddr
       this.dispatchEvent(new CustomEvent('listening'))
     }
 
     // Peer nodes use a multiaddr containing webrtc-star id to listen using a signalling channel
     // If signalling is enabled and listen multiaddr contains webrtc-star id, use WebRTCDirectSigServer
-    if (this.signallingEnabled && this.multiaddr.toString().includes(P2P_WEBRTC_STAR_ID)) {
+    if (this.signallingEnabled && multiaddr.toString().includes(P2P_WEBRTC_STAR_ID)) {
       this.server = new WebRTCDirectSigServer(multiaddr, this.wrtc, this.receiverOptions)
       this.server.addEventListener('listening', disPatchListeningEvent)
     } else {
@@ -95,6 +95,23 @@ export class WebRTCDirectListener extends EventEmitter<ListenerEvents> implement
       await this.server.close()
     }
 
+    this.dispatchEvent(new CustomEvent('close'))
+  }
+
+  registerSignallingChannel (signallingChannel: RTCDataChannel) {
+    this.server?.registerSignallingChannel(signallingChannel)
+  }
+
+  deRegisterSignallingChannel () {
+    if (!(this.server instanceof WebRTCDirectSigServer)) {
+      return
+    }
+
+    this.server.deRegisterSignallingChannel()
+
+    // Unset this.multiaddr as this listener becomes inactive if signalling channel is closed
+    // Dispatch 'close' event so that node's announce addresses get updated (through getAddrs())
+    delete this.multiaddr
     this.dispatchEvent(new CustomEvent('close'))
   }
 
