@@ -1,6 +1,6 @@
 {
   "name": "@cerc-io/webrtc-direct",
-  "version": "5.0.0-laconic-0.1.1",
+  "version": "5.0.0-laconic-0.1.2",
   "description": "Dial using WebRTC without the need to set up any Signalling Rendezvous Point! ",
   "license": "Apache-2.0 OR MIT",
   "homepage": "https://github.com/libp2p/js-libp2p-webrtc-direct#readme",

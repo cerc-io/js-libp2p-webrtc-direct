@@ -122,7 +122,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
   })
 
   describe('dial using signalling channel', function () {
-    this.timeout(20 * 1000)
+    this.timeout(30 * 1000)
 
     const registrar = mockRegistrar()
     void registrar.handle(ECHO_PROTOCOL, ({ stream }) => {

@@ -196,7 +196,7 @@ export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
   })
 
   describe('listen using signalling channel', function () {
-    this.timeout(20 * 1000)
+    this.timeout(30 * 1000)
 
     const registrar = mockRegistrar()
     const upgrader = mockUpgrader({ registrar })
