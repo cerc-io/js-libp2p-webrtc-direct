@@ -129,6 +129,10 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
     channel.handleSignal(incSignal)
   }
 
+  deRegisterSignallingChannel () {
+    this.signallingChannel = undefined
+  }
+
   async close () {
     await Promise.all(
       this.channels.map(async (channel) => await channel.close())

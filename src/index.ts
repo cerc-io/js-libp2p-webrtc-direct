@@ -318,8 +318,8 @@ class WebRTCDirect implements Transport {
         // Register signalling channel with the listener
         // (this.peerListener is set in this.createListener which is called for the provided listen address)
         // (only single listen address supported for now)
-        if ((this.peerListener?.server) != null) {
-          this.peerListener.server.registerSignallingChannel(signallingChannel)
+        if ((this.peerListener) != null) {
+          this.peerListener.registerSignallingChannel(signallingChannel)
         }
 
         // For signalling channels from peer to relay nodes
@@ -346,7 +346,12 @@ class WebRTCDirect implements Transport {
         log('signalling channel closed')
 
         // Unset the signalling channel for this peer
-        delete this.signallingChannel
+        this.signallingChannel = undefined
+
+        // Deregister this signalling channel from the listener
+        if ((this.peerListener) != null) {
+          this.peerListener.deRegisterSignallingChannel()
+        }
 
         // Open a new signalling channel if peer connection still exists
         this._createSignallingChannel(channel)

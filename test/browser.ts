@@ -1,14 +1,16 @@
 
-import { peerIdFromString } from '@libp2p/peer-id'
 import listenTests from './listen.js'
 import dialTests from './dial.js'
 import { webRTCDirect } from '../src/index.js'
+import { PEER_ID, SIG_PEER_ID } from './constants.js'
 
 describe('browser RTC', () => {
-  const peerId = peerIdFromString('QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSooo2a')
-  const create = async () => {
-    const ws = webRTCDirect()({
-      peerId
+  const create = async (peerIdArg = PEER_ID) => {
+    const ws = webRTCDirect({
+      enableSignalling: true,
+      relayPeerId: SIG_PEER_ID.toString()
+    })({
+      peerId: peerIdArg
     })
 
     return ws
