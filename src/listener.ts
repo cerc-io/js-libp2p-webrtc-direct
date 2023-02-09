@@ -111,7 +111,7 @@ export class WebRTCDirectListener extends EventEmitter<ListenerEvents> implement
 
     // Unset this.multiaddr as this listener becomes inactive if signalling channel is closed
     // Dispatch 'close' event so that node's announce addresses get updated (through getAddrs())
-    delete this.multiaddr
+    this.multiaddr = undefined
     this.dispatchEvent(new CustomEvent('close'))
   }
 

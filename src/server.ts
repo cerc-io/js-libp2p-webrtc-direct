@@ -130,7 +130,7 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
   }
 
   deRegisterSignallingChannel () {
-    delete this.signallingChannel
+    this.signallingChannel = undefined
   }
 
   async close () {

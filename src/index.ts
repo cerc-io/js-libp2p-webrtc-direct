@@ -346,7 +346,7 @@ class WebRTCDirect implements Transport {
         log('signalling channel closed')
 
         // Unset the signalling channel for this peer
-        delete this.signallingChannel
+        this.signallingChannel = undefined
 
         // Deregister this signalling channel from the listener
         if ((this.peerListener) != null) {
