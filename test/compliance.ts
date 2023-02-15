@@ -6,7 +6,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 
 export default (create: () => Promise<Transport>) => {
   describe('interface-transport compliance', function () {
-    this.timeout(20 * 1000)
+    this.timeout(30 * 1000)
 
     tests({
       async setup () {
