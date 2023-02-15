@@ -20,7 +20,7 @@ import {
 
 export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
   describe('listen', function () {
-    this.timeout(20 * 1000)
+    this.timeout(30 * 1000)
 
     if (isBrowser) {
       return

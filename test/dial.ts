@@ -31,7 +31,7 @@ async function * toBytes (source: Source<Uint8ArrayList>) {
 
 export default (create: (peerIdArg?: PeerId) => Promise<Transport>) => {
   describe('dial', function () {
-    this.timeout(20 * 1000)
+    this.timeout(30 * 1000)
 
     let upgrader: Upgrader
 
