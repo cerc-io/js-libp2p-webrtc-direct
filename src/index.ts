@@ -17,8 +17,10 @@ import { CODE_CIRCUIT, CODE_P2P, P2P_WEBRTC_STAR_ID } from './constants.js'
 import { toMultiaddrConnection } from './socket-to-conn.js'
 import { createListener, WebRTCDirectListener } from './listener.js'
 import { ConnectRequest, JoinRequest, SignallingChannelType, SignallingMessage } from './signal-message.js'
+import { setChannelClosingInterval } from './helpers.js'
 
 const log = logger('libp2p:webrtc-direct')
+const debugLog = logger('laconic:webrtc-direct:debug')
 
 export { P2P_WEBRTC_STAR_ID } from './constants.js'
 
@@ -335,14 +337,20 @@ class WebRTCDirect implements Transport {
           }
 
           const msg = uint8ArrayFromString(JSON.stringify(request))
-          signallingChannel.send(msg)
+
+          try {
+            signallingChannel.send(msg)
+          } catch (err: any) {
+            debugLog('_registerSignallingChannelHandler signalling channel send failed', err)
+            debugLog('signallingChannel.readyState', signallingChannel.readyState)
+          }
         }
 
         // Resolve deferredSignallingChannel promise
         deferredSignallingChannel.resolve()
       })
 
-      signallingChannel.addEventListener('close', () => {
+      const channelClosedHandler = () => {
         log('signalling channel closed')
 
         // Unset the signalling channel for this peer
@@ -355,7 +363,14 @@ class WebRTCDirect implements Transport {
 
         // Open a new signalling channel if peer connection still exists
         this._createSignallingChannel(channel)
-      })
+      }
+
+      const closingInterval = setChannelClosingInterval(signallingChannel, channelClosedHandler)
+
+      signallingChannel.addEventListener('close', () => {
+        clearInterval(closingInterval)
+        channelClosedHandler()
+      }, { once: true })
 
       signallingChannel.addEventListener('error', (evt) => {
         // @ts-expect-error ChannelErrorEvent is just an Event in the types?
@@ -498,7 +513,12 @@ class WebRTCDirect implements Transport {
             }
             signallingChannel.addEventListener('message', onMessage)
 
-            signallingChannel.send(uint8ArrayFromString(JSON.stringify(request)))
+            try {
+              signallingChannel.send(uint8ArrayFromString(JSON.stringify(request)))
+            } catch (err: any) {
+              debugLog('_registerSignallingChannelHandler signalling channel send failed', err)
+              debugLog('signallingChannel.readyState', signallingChannel.readyState)
+            }
           })
 
           const responseSignal = JSON.parse(responseSignalJson)

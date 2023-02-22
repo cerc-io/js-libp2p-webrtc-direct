@@ -13,3 +13,6 @@ export const CLOSE_TIMEOUT = 2000
 
 // TTL for time cache of seen signalling channel messages in relay nodes
 export const SEEN_CACHE_TTL = 30 * 1000 // 30 seconds
+
+// Interval (ms) to check if channel is closed
+export const CHANNEL_CLOSED_TIMEOUT = 5 * 1000 // 5 seconds
