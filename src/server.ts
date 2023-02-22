@@ -393,13 +393,13 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         signallingChannel.addEventListener('error', untrackChannel)
       }
 
-      // Keep track of the signalling channel from another relay node
-      if (type === SignallingChannelType.Relay) {
-        trackRelaySignallingChannel()
-      }
-
-      // Resolve deferredSignallingChannel promise when signalling channel opens
       signallingChannel.addEventListener('open', () => {
+        // Keep track of the signalling channel from another relay node
+        if (type === SignallingChannelType.Relay) {
+          trackRelaySignallingChannel()
+        }
+
+        // Resolve deferredSignallingChannel promise when signalling channel opens
         deferredSignallingChannel.resolve()
       })
 
@@ -416,6 +416,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
               throw new Error('Unexpected JoinRequest over relay signalling channel')
             }
 
+            // Keep track of the signalling channel from peer nodes
             trackPeerSignallingChannel(msg.peerId)
             return
           }

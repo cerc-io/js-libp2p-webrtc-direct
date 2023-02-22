@@ -316,7 +316,33 @@ class WebRTCDirect implements Transport {
     const handleSignallingChannel = (evt: CustomEvent<RTCDataChannel>) => {
       const signallingChannel = evt.detail
 
+      const channelClosedHandler = () => {
+        log('signalling channel closed')
+
+        // Unset the signalling channel for this peer
+        this.signallingChannel = undefined
+
+        // Deregister this signalling channel from the listener
+        if ((this.peerListener) != null) {
+          this.peerListener.deRegisterSignallingChannel()
+        }
+
+        // Open a new signalling channel if peer connection still exists
+        this._createSignallingChannel(channel)
+      }
+
       signallingChannel.addEventListener('open', () => {
+        // Start monitoring the signalling channel state
+        // Run the close handler if the channel is in 'closed' state, but 'closed' event was not fired
+        const closingInterval = setChannelClosingInterval(signallingChannel, channelClosedHandler)
+
+        signallingChannel.addEventListener('close', () => {
+          // Stop monitoring the channel state
+          clearInterval(closingInterval)
+          // Run the close handler
+          channelClosedHandler()
+        }, { once: true })
+
         // Register signalling channel with the listener
         // (this.peerListener is set in this.createListener which is called for the provided listen address)
         // (only single listen address supported for now)
@@ -349,28 +375,6 @@ class WebRTCDirect implements Transport {
         // Resolve deferredSignallingChannel promise
         deferredSignallingChannel.resolve()
       })
-
-      const channelClosedHandler = () => {
-        log('signalling channel closed')
-
-        // Unset the signalling channel for this peer
-        this.signallingChannel = undefined
-
-        // Deregister this signalling channel from the listener
-        if ((this.peerListener) != null) {
-          this.peerListener.deRegisterSignallingChannel()
-        }
-
-        // Open a new signalling channel if peer connection still exists
-        this._createSignallingChannel(channel)
-      }
-
-      const closingInterval = setChannelClosingInterval(signallingChannel, channelClosedHandler)
-
-      signallingChannel.addEventListener('close', () => {
-        clearInterval(closingInterval)
-        channelClosedHandler()
-      }, { once: true })
 
       signallingChannel.addEventListener('error', (evt) => {
         // @ts-expect-error ChannelErrorEvent is just an Event in the types?
@@ -516,7 +520,7 @@ class WebRTCDirect implements Transport {
             try {
               signallingChannel.send(uint8ArrayFromString(JSON.stringify(request)))
             } catch (err: any) {
-              debugLog('_registerSignallingChannelHandler signalling channel send failed', err)
+              debugLog('_connectUsingSignallingChannel signalling channel send failed', err)
               debugLog('signallingChannel.readyState', signallingChannel.readyState)
             }
           })
