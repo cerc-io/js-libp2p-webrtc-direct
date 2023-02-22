@@ -17,8 +17,10 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import { http } from './http-server.js'
 import { ConnectRequest, ConnectResponse, SignallingChannelType, SignallingMessage } from './signal-message.js'
 import { SEEN_CACHE_TTL } from './constants.js'
+import { setChannelClosingInterval } from './helpers.js'
 
 const log = logger('libp2p:webrtc-direct:listener')
+const debugLog = logger('laconic:webrtc-direct:debug')
 
 interface WebRTCDirectServerEvents {
   'error': CustomEvent<Error>
@@ -99,7 +101,13 @@ export class WebRTCDirectSigServer extends EventEmitter<WebRTCDirectServerEvents
         dst: request.src,
         signal: signalStr
       }
-      signallingChannel.send(uint8ArrayFromString(JSON.stringify(response)))
+
+      try {
+        signallingChannel.send(uint8ArrayFromString(JSON.stringify(response)))
+      } catch (err: any) {
+        debugLog('processRequest signalling channel send failed', err)
+        debugLog('signallingChannel.readyState', signallingChannel.readyState)
+      }
     })
     channel.addEventListener('error', (evt) => {
       const err = evt.detail
@@ -222,9 +230,12 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
       this.relaySignallingChannels = this.relaySignallingChannels.filter(c => c !== signallingChannel)
     }
 
-    signallingChannel.addEventListener('close', untrackChannel, {
-      once: true
-    })
+    const closingInterval = setChannelClosingInterval(signallingChannel, untrackChannel)
+
+    signallingChannel.addEventListener('close', () => {
+      clearInterval(closingInterval)
+      untrackChannel()
+    }, { once: true })
   }
 
   async processRequest (req: IncomingMessage, res: ServerResponse) {
@@ -356,7 +367,12 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         const untrackChannel = () => {
           this.relaySignallingChannels = this.relaySignallingChannels.filter(s => s !== signallingChannel)
         }
-        signallingChannel.addEventListener('close', untrackChannel)
+        const closingInterval = setChannelClosingInterval(signallingChannel, untrackChannel)
+
+        signallingChannel.addEventListener('close', () => {
+          clearInterval(closingInterval)
+          untrackChannel()
+        }, { once: true })
         signallingChannel.addEventListener('error', untrackChannel)
       }
 
@@ -368,18 +384,22 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
         const untrackChannel = () => {
           this.peerSignallingChannelMap.delete(peerId)
         }
+        const closingInterval = setChannelClosingInterval(signallingChannel, untrackChannel)
 
-        signallingChannel.addEventListener('close', untrackChannel)
+        signallingChannel.addEventListener('close', () => {
+          clearInterval(closingInterval)
+          untrackChannel()
+        }, { once: true })
         signallingChannel.addEventListener('error', untrackChannel)
       }
 
-      // Keep track of the signalling channel from another relay node
-      if (type === SignallingChannelType.Relay) {
-        trackRelaySignallingChannel()
-      }
-
-      // Resolve deferredSignallingChannel promise when signalling channel opens
       signallingChannel.addEventListener('open', () => {
+        // Keep track of the signalling channel from another relay node
+        if (type === SignallingChannelType.Relay) {
+          trackRelaySignallingChannel()
+        }
+
+        // Resolve deferredSignallingChannel promise when signalling channel opens
         deferredSignallingChannel.resolve()
       })
 
@@ -396,6 +416,7 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
               throw new Error('Unexpected JoinRequest over relay signalling channel')
             }
 
+            // Keep track of the signalling channel from peer nodes
             trackPeerSignallingChannel(msg.peerId)
             return
           }
@@ -436,7 +457,12 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
 
     // Forward peer signalling message to its destination if a signalling channel is present
     if (destPeerSignallingChannel != null) {
-      destPeerSignallingChannel.send(msg)
+      try {
+        destPeerSignallingChannel.send(msg)
+      } catch (err: any) {
+        debugLog('dest signalling channel send failed', err)
+        debugLog('destPeerSignallingChannel.readyState', destPeerSignallingChannel.readyState)
+      }
     } else {
       // Otherwise, forward the signalling message to all the connected relay nodes
       this.relaySignallingChannels.forEach(relaySignallingChannel => {
@@ -445,7 +471,12 @@ export class WebRTCDirectServer extends EventEmitter<WebRTCDirectServerEvents> {
           return
         }
 
-        relaySignallingChannel.send(msg)
+        try {
+          relaySignallingChannel.send(msg)
+        } catch (err: any) {
+          debugLog('relay signalling channel send failed', err)
+          debugLog('relaySignallingChannel.readyState', relaySignallingChannel.readyState)
+        }
       })
     }
   }
